@@ -195,62 +195,10 @@ const AuthModal = ({ isOpen, onClose, mode, setMode, onAuthSuccess, lang }: {
     first_name: '',
     last_name: ''
   });
-  const [otpMode, setOtpMode] = useState(false);
-  const [otpSent, setOtpSent] = useState(false);
-  const [otpCode, setOtpCode] = useState('');
   const [verificationSent, setVerificationSent] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-
-  const handleSendOTP = async () => {
-    if (!formData.email) {
-      setError('Please enter your email first');
-      return;
-    }
-    setLoading(true);
-    setError('');
-    try {
-      const response = await fetch('/api/auth/otp/send', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: formData.email })
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Failed to send OTP');
-      setOtpSent(true);
-      setError('OTP sent to your email!');
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleVerifyOTP = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!otpCode) {
-      setError('Please enter the OTP code');
-      return;
-    }
-    setLoading(true);
-    setError('');
-    try {
-      const response = await fetch('/api/auth/otp/verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: formData.email, token: otpCode })
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Invalid OTP');
-      onAuthSuccess(data.token, data.user);
-      onClose();
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -377,12 +325,10 @@ const AuthModal = ({ isOpen, onClose, mode, setMode, onAuthSuccess, lang }: {
           <X className="w-6 h-6" />
         </button>
         <h2 className="text-3xl font-display font-bold mb-2">
-          {otpMode ? 'OTP Login' : (mode === 'login' ? translations[lang].nav.login : 'Create Account')}
+          {mode === 'login' ? translations[lang].nav.login : 'Create Account'}
         </h2>
         <p className="text-white/60 mb-8">
-          {otpMode 
-            ? 'Enter your email to receive a login code' 
-            : (mode === 'login' ? 'Sign in to access your tournaments' : 'Join the elite Free Fire community')}
+          {mode === 'login' ? 'Sign in to access your tournaments' : 'Join the elite Free Fire community'}
         </p>
 
         {error && (
@@ -392,65 +338,8 @@ const AuthModal = ({ isOpen, onClose, mode, setMode, onAuthSuccess, lang }: {
           </div>
         )}
 
-        <form onSubmit={otpMode ? (otpSent ? handleVerifyOTP : (e) => e.preventDefault()) : handleSubmit} className="space-y-4">
-          <div className="space-y-2">
-            <input 
-              type="email" 
-              required 
-              className="input-field"
-              placeholder={translations[lang].profile.email}
-              value={formData.email}
-              onChange={(e) => setFormData({...formData, email: e.target.value})}
-              disabled={otpSent}
-            />
-          </div>
-
-          {otpMode ? (
-            <>
-              {otpSent && (
-                <div className="space-y-2">
-                  <input 
-                    type="text" 
-                    required 
-                    className="input-field text-center text-2xl tracking-[0.5em] font-mono"
-                    placeholder="000000"
-                    maxLength={6}
-                    value={otpCode}
-                    onChange={(e) => setOtpCode(e.target.value)}
-                  />
-                </div>
-              )}
-              
-              {!otpSent ? (
-                <button 
-                  type="button"
-                  onClick={handleSendOTP}
-                  disabled={loading}
-                  className="btn-primary w-full flex items-center justify-center gap-2"
-                >
-                  {loading ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : 'Send Login Code'}
-                </button>
-              ) : (
-                <button 
-                  type="submit"
-                  disabled={loading}
-                  className="btn-primary w-full flex items-center justify-center gap-2"
-                >
-                  {loading ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : 'Verify & Login'}
-                </button>
-              )}
-              
-              <button 
-                type="button"
-                onClick={() => { setOtpMode(false); setOtpSent(false); setError(''); }}
-                className="w-full text-white/40 text-sm hover:text-white transition-colors"
-              >
-                Back to Password Login
-              </button>
-            </>
-          ) : (
-            <>
-              {mode === 'signup' && (
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {mode === 'signup' && (
             <>
               <div className="grid grid-cols-2 gap-4">
                 <input
@@ -533,35 +422,21 @@ const AuthModal = ({ isOpen, onClose, mode, setMode, onAuthSuccess, lang }: {
             </div>
           )}
 
-          {error && <p className={cn("text-sm", error.includes('created') || error.includes('sent') ? "text-green-500" : "text-red-500")}>{error}</p>}
-
           <button type="submit" disabled={loading} className="btn-primary w-full mt-4">
             {loading ? 'Processing...' : (mode === 'login' ? translations[lang].nav.login : 'Sign Up')}
           </button>
-        </>
-      )}
-    </form>
+        </form>
 
-        <div className="mt-6 text-center space-y-4">
+        <div className="mt-6 text-center">
           <p className="text-white/60 text-sm">
             {mode === 'login' ? "Don't have an account? " : "Already have an account? "}
             <button 
-              onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setOtpMode(false); setError(''); }} 
+              onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setError(''); }} 
               className="text-orange-500 font-bold hover:underline"
             >
               {mode === 'login' ? 'Sign Up' : 'Sign In'}
             </button>
           </p>
-          
-          {mode === 'login' && !otpMode && (
-            <button 
-              type="button"
-              onClick={() => { setOtpMode(true); setError(''); }}
-              className="text-white/40 text-xs hover:text-white transition-colors flex items-center justify-center gap-1 w-full"
-            >
-              <Mail className="w-3 h-3" /> Login with Email OTP
-            </button>
-          )}
         </div>
       </motion.div>
     </div>
@@ -570,49 +445,83 @@ const AuthModal = ({ isOpen, onClose, mode, setMode, onAuthSuccess, lang }: {
 
 const TournamentCard: React.FC<{ tournament: Tournament, onRegister: (id: number) => void, lang: Language }> = ({ tournament, onRegister, lang }) => {
   const t = translations[lang].hero;
+  const [timeLeft, setTimeLeft] = useState<string>('');
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const now = new Date().getTime();
+      const start = new Date(tournament.start_date).getTime();
+      const distance = start - now;
+
+      if (distance < 0) {
+        setTimeLeft('Started');
+        clearInterval(timer);
+        return;
+      }
+
+      const hours = Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+      const minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
+      const seconds = Math.floor((distance % (1000 * 60)) / 1000);
+
+      setTimeLeft(`${hours}h ${minutes}m ${seconds}s`);
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [tournament.start_date]);
+
   return (
     <motion.div 
       whileHover={{ y: -5 }}
-      className="glass-card p-6 flex flex-col gap-4 group"
+      className="glass-card p-6 flex flex-col gap-4 group border-white/5 hover:border-orange-500/30 transition-all"
     >
       <div className="flex justify-between items-start">
-        <div className="bg-orange-600/20 text-orange-500 text-xs font-bold px-3 py-1 rounded-full border border-orange-500/20">
-          {tournament.status.toUpperCase()}
+        <div className="flex gap-2">
+          <span className="bg-orange-600/20 text-orange-500 text-[10px] font-bold px-2 py-1 rounded uppercase tracking-wider border border-orange-500/20">
+            {tournament.type || 'Classic'}
+          </span>
+          <span className="bg-white/5 text-white/60 text-[10px] font-bold px-2 py-1 rounded uppercase tracking-wider border border-white/10">
+            {tournament.mode || 'Solo'}
+          </span>
         </div>
-        <div className="text-white/40 text-sm font-mono">
-          #{tournament.id}
+        <div className="text-orange-500 font-mono text-xs font-bold flex items-center gap-1">
+          <Clock className="w-3 h-3" />
+          {timeLeft}
         </div>
       </div>
       
       <div>
-        <h3 className="text-xl font-display font-bold mb-2 group-hover:text-orange-500 transition-colors">{tournament.title}</h3>
-        <p className="text-white/60 text-sm line-clamp-2">{tournament.description}</p>
+        <h3 className="text-xl font-display font-bold mb-1 group-hover:text-orange-500 transition-colors">{tournament.title}</h3>
+        <p className="text-white/40 text-xs line-clamp-2">{tournament.description}</p>
       </div>
 
-      <div className="grid grid-cols-2 gap-4 my-2">
-        <div className="flex items-center gap-2 text-sm">
-          <Trophy className="w-4 h-4 text-orange-500" />
-          <span>{tournament.prize_pool}</span>
+      <div className="grid grid-cols-2 gap-3 my-2">
+        <div className="bg-white/5 p-3 rounded-xl border border-white/5">
+          <div className="text-[10px] text-white/40 uppercase font-bold mb-1">Entry Fee</div>
+          <div className="text-lg font-bold text-white">৳{tournament.entry_fee}</div>
         </div>
-        <div className="flex items-center gap-2 text-sm">
-          <Users className="w-4 h-4 text-orange-500" />
-          <span>{tournament.slots_filled}/{tournament.slots_total} Slots</span>
+        <div className="bg-white/5 p-3 rounded-xl border border-white/5">
+          <div className="text-[10px] text-white/40 uppercase font-bold mb-1">Prize Pool</div>
+          <div className="text-lg font-bold text-orange-500">৳{tournament.prize_pool}</div>
         </div>
-        <div className="flex items-center gap-2 text-sm">
-          <Zap className="w-4 h-4 text-orange-500" />
-          <span>{tournament.entry_fee}</span>
+      </div>
+
+      <div className="flex justify-between items-center text-xs text-white/40 px-1">
+        <div className="flex items-center gap-1">
+          <Users className="w-3 h-3" />
+          <span>{tournament.slots_filled}/{tournament.slots_total} Joined</span>
         </div>
-        <div className="flex items-center gap-2 text-sm">
-          <Calendar className="w-4 h-4 text-orange-500" />
-          <span>{new Date(tournament.start_date).toLocaleDateString()}</span>
+        <div className="flex items-center gap-1">
+          <Calendar className="w-3 h-3" />
+          <span>{new Date(tournament.start_date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
         </div>
       </div>
 
       <button 
         onClick={() => onRegister(tournament.id)}
-        className="btn-primary w-full py-2 mt-auto"
+        className="btn-primary w-full py-3 mt-2 flex items-center justify-center gap-2 group/btn"
       >
-        {t.join_now || 'Join Tournament'}
+        {t.join_now || 'Join Now'}
+        <ChevronRight className="w-4 h-4 group-hover/btn:translate-x-1 transition-transform" />
       </button>
     </motion.div>
   );
@@ -762,6 +671,47 @@ const LandingPage = ({ user, openAuth, lang }: { user: User | null, openAuth: (m
                 onRegister={() => openAuth('login')} 
               />
             ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Why Choose Us */}
+      <section className="px-6 py-20 bg-white/5">
+        <div className="max-w-7xl mx-auto">
+          <div className="text-center mb-16">
+            <h2 className="text-4xl font-display font-bold mb-4">Why Choose Us?</h2>
+            <p className="text-white/60">The ultimate destination for Free Fire enthusiasts</p>
+          </div>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
+            <div className="glass-card p-8 text-center space-y-4">
+              <div className="w-16 h-16 bg-orange-600/20 rounded-2xl flex items-center justify-center mx-auto">
+                <Shield className="w-8 h-8 text-orange-500" />
+              </div>
+              <h3 className="text-xl font-bold">Secure Payments</h3>
+              <p className="text-sm text-white/40">Fast and secure bKash deposits and withdrawals with manual verification.</p>
+            </div>
+            <div className="glass-card p-8 text-center space-y-4">
+              <div className="w-16 h-16 bg-orange-600/20 rounded-2xl flex items-center justify-center mx-auto">
+                <Trophy className="w-8 h-8 text-orange-500" />
+              </div>
+              <h3 className="text-xl font-bold">Fair Play</h3>
+              <p className="text-sm text-white/40">Strict anti-cheat measures and manual match verification by admins.</p>
+            </div>
+            <div className="glass-card p-8 text-center space-y-4">
+              <div className="w-16 h-16 bg-orange-600/20 rounded-2xl flex items-center justify-center mx-auto">
+                <Zap className="w-8 h-8 text-orange-500" />
+              </div>
+              <h3 className="text-xl font-bold">Instant Support</h3>
+              <p className="text-sm text-white/40">24/7 dedicated support via Discord and WhatsApp for all players.</p>
+            </div>
+            <div className="glass-card p-8 text-center space-y-4">
+              <div className="w-16 h-16 bg-orange-600/20 rounded-2xl flex items-center justify-center mx-auto">
+                <Target className="w-8 h-8 text-orange-500" />
+              </div>
+              <h3 className="text-xl font-bold">Daily Matches</h3>
+              <p className="text-sm text-white/40">Multiple match types including Classic, CS, and Lone Wolf every day.</p>
+            </div>
           </div>
         </div>
       </section>
@@ -1354,10 +1304,13 @@ const AdminPanel = ({ user }: { user: User }) => {
   const [users, setUsers] = useState<any[]>([]);
   const [notice, setNotice] = useState('');
   const [loading, setLoading] = useState(false);
+  const [balanceUpdate, setBalanceUpdate] = useState<{userId: number, amount: string}>({userId: 0, amount: ''});
   const [stats, setStats] = useState({ users: 0, tournaments: 0, pending: 0 });
-  const [activeTab, setActiveTab] = useState<'requests' | 'users' | 'notice'>('requests');
+  const [activeTab, setActiveTab] = useState<'requests' | 'users' | 'notice' | 'post_match' | 'overview'>('overview');
 
   useEffect(() => {
+    const adminEmails = ['yourmeherun007@gmail.com', 'rafiyajannat404@gmail.com'];
+    if (!adminEmails.includes(user.email)) return;
     fetchTransactions();
     fetchStats();
     fetchUsers();
@@ -1416,7 +1369,32 @@ const AdminPanel = ({ user }: { user: User }) => {
     alert('Notice posted!');
   };
 
-  if (!user.is_admin) return <Navigate to="/" />;
+  const handleUpdateBalance = async (userId: number) => {
+    if (!balanceUpdate.amount) return;
+    setLoading(true);
+    const token = localStorage.getItem('ff_token');
+    try {
+      const res = await fetch(`/api/admin/users/${userId}/balance`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ balance: parseFloat(balanceUpdate.amount) })
+      });
+      if (!res.ok) throw new Error('Failed to update balance');
+      alert('Balance updated successfully!');
+      setBalanceUpdate({userId: 0, amount: ''});
+      fetchUsers();
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const adminEmails = ['yourmeherun007@gmail.com', 'rafiyajannat404@gmail.com'];
+  if (!adminEmails.includes(user.email)) return <Navigate to="/" />;
 
   return (
     <div className="pt-32 pb-32 px-6">
@@ -1424,6 +1402,12 @@ const AdminPanel = ({ user }: { user: User }) => {
         <h1 className="text-4xl font-display font-bold mb-12">Admin Control Center</h1>
 
         <div className="flex gap-4 mb-8 overflow-x-auto pb-2">
+          <button 
+            onClick={() => setActiveTab('overview')}
+            className={cn("px-6 py-2 rounded-full font-bold transition-all whitespace-nowrap", activeTab === 'overview' ? "bg-orange-600 text-white" : "bg-white/5 text-white/40 hover:text-white")}
+          >
+            Overview
+          </button>
           <button 
             onClick={() => setActiveTab('requests')}
             className={cn("px-6 py-2 rounded-full font-bold transition-all whitespace-nowrap", activeTab === 'requests' ? "bg-orange-600 text-white" : "bg-white/5 text-white/40 hover:text-white")}
@@ -1442,10 +1426,151 @@ const AdminPanel = ({ user }: { user: User }) => {
           >
             Post Notice
           </button>
+          <button 
+            onClick={() => setActiveTab('post_match')}
+            className={cn("px-6 py-2 rounded-full font-bold transition-all whitespace-nowrap", activeTab === 'post_match' ? "bg-orange-600 text-white" : "bg-white/5 text-white/40 hover:text-white")}
+          >
+            Post Match
+          </button>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-2 space-y-8">
+            {activeTab === 'overview' && (
+              <div className="space-y-8">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div className="glass-card p-6 border-l-4 border-orange-600">
+                    <div className="text-white/40 text-xs uppercase font-bold mb-2">Total Revenue</div>
+                    <div className="text-3xl font-bold">৳{users.reduce((acc, curr) => acc + (curr.balance || 0), 0)}</div>
+                  </div>
+                  <div className="glass-card p-6 border-l-4 border-emerald-500">
+                    <div className="text-white/40 text-xs uppercase font-bold mb-2">Active Players</div>
+                    <div className="text-3xl font-bold">{users.length}</div>
+                  </div>
+                  <div className="glass-card p-6 border-l-4 border-blue-500">
+                    <div className="text-white/40 text-xs uppercase font-bold mb-2">Total Matches</div>
+                    <div className="text-3xl font-bold">{stats.tournaments}</div>
+                  </div>
+                </div>
+
+                <div className="glass-card p-8">
+                  <h2 className="text-2xl font-display font-bold mb-6">Recent Activity</h2>
+                  <div className="space-y-4">
+                    {transactions.slice(0, 5).map(tx => (
+                      <div key={tx.id} className="flex items-center justify-between p-4 bg-white/5 rounded-xl">
+                        <div className="flex items-center gap-4">
+                          <div className={cn("p-2 rounded-lg", tx.type === 'deposit' ? "bg-emerald-500/10 text-emerald-500" : "bg-red-500/10 text-red-500")}>
+                            {tx.type === 'deposit' ? <Plus className="w-4 h-4" /> : <ArrowUpRight className="w-4 h-4" />}
+                          </div>
+                          <div>
+                            <div className="font-bold">{tx.username}</div>
+                            <div className="text-xs text-white/40">{tx.type} via {tx.method}</div>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className="font-bold">৳{tx.amount}</div>
+                          <div className="text-[10px] text-white/20 uppercase">{new Date(tx.created_at).toLocaleDateString()}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'post_match' && (
+              <div className="glass-card p-8">
+                <h2 className="text-2xl font-display font-bold mb-6">Create New Match</h2>
+                <form onSubmit={async (e) => {
+                  e.preventDefault();
+                  setLoading(true);
+                  const target = e.target as any;
+                  const formData = {
+                    title: target.title.value,
+                    description: target.description.value,
+                    type: target.type.value,
+                    mode: target.mode.value,
+                    entry_fee: parseInt(target.entry_fee.value),
+                    prize_pool: parseInt(target.prize_pool.value),
+                    start_date: target.start_date.value,
+                    slots_total: parseInt(target.slots_total.value),
+                    image: target.image.value || 'https://picsum.photos/seed/gaming/800/400'
+                  };
+                  
+                  const token = localStorage.getItem('ff_token');
+                  try {
+                    const res = await fetch('/api/admin/tournaments', {
+                      method: 'POST',
+                      headers: { 
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                      },
+                      body: JSON.stringify(formData)
+                    });
+                    if (res.ok) {
+                      alert('Match posted successfully!');
+                      target.reset();
+                      fetchStats();
+                    }
+                  } catch (err) {
+                    alert('Failed to post match');
+                  } finally {
+                    setLoading(false);
+                  }
+                }} className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="col-span-2">
+                      <label className="block text-sm text-white/40 mb-2">Match Title</label>
+                      <input name="title" required className="input-field" placeholder="e.g. Daily Classic Solo" />
+                    </div>
+                    <div className="col-span-2">
+                      <label className="block text-sm text-white/40 mb-2">Description</label>
+                      <textarea name="description" required className="input-field min-h-[100px]" placeholder="Rules and details..." />
+                    </div>
+                    <div>
+                      <label className="block text-sm text-white/40 mb-2">Type</label>
+                      <select name="type" className="input-field">
+                        <option value="Classic">Classic</option>
+                        <option value="Clash Squad">Clash Squad</option>
+                        <option value="Lone Wolf">Lone Wolf</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm text-white/40 mb-2">Mode</label>
+                      <select name="mode" className="input-field">
+                        <option value="Solo">Solo</option>
+                        <option value="Duo">Duo</option>
+                        <option value="Squad">Squad</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm text-white/40 mb-2">Entry Fee (৳)</label>
+                      <input name="entry_fee" type="number" required className="input-field" placeholder="20" />
+                    </div>
+                    <div>
+                      <label className="block text-sm text-white/40 mb-2">Prize Pool (৳)</label>
+                      <input name="prize_pool" type="number" required className="input-field" placeholder="100" />
+                    </div>
+                    <div>
+                      <label className="block text-sm text-white/40 mb-2">Total Slots</label>
+                      <input name="slots_total" type="number" required className="input-field" placeholder="48" />
+                    </div>
+                    <div>
+                      <label className="block text-sm text-white/40 mb-2">Start Date & Time</label>
+                      <input name="start_date" type="datetime-local" required className="input-field" />
+                    </div>
+                    <div className="col-span-2">
+                      <label className="block text-sm text-white/40 mb-2">Image URL (Optional)</label>
+                      <input name="image" className="input-field" placeholder="https://..." />
+                    </div>
+                  </div>
+                  <button type="submit" disabled={loading} className="btn-primary w-full py-4 text-lg font-bold">
+                    {loading ? 'Posting...' : 'Post Match to Website'}
+                  </button>
+                </form>
+              </div>
+            )}
+
             {activeTab === 'requests' && (
               <div className="glass-card p-8">
                 <h2 className="text-2xl font-display font-bold mb-6">Pending Requests</h2>
@@ -1509,14 +1634,33 @@ const AdminPanel = ({ user }: { user: User }) => {
                 <h2 className="text-2xl font-display font-bold mb-6">Registered Users</h2>
                 <div className="space-y-4">
                   {users.map(u => (
-                    <div key={u.id} className="bg-white/5 border border-white/10 rounded-xl p-4 flex justify-between items-center">
-                      <div>
-                        <div className="font-bold">{u.username} ({u.first_name} {u.last_name})</div>
-                        <div className="text-xs text-white/40">{u.email} | ID: {u.ff_id}</div>
+                    <div key={u.id} className="bg-white/5 border border-white/10 rounded-xl p-4 space-y-4">
+                      <div className="flex justify-between items-center">
+                        <div>
+                          <div className="font-bold">{u.username} ({u.first_name} {u.last_name})</div>
+                          <div className="text-xs text-white/40">{u.email} | ID: {u.ff_id}</div>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-orange-500 font-bold">৳{u.balance}</div>
+                          <div className="text-[10px] text-white/20 uppercase">{new Date(u.created_at).toLocaleDateString()}</div>
+                        </div>
                       </div>
-                      <div className="text-right">
-                        <div className="text-orange-500 font-bold">৳{u.balance}</div>
-                        <div className="text-[10px] text-white/20 uppercase">{new Date(u.created_at).toLocaleDateString()}</div>
+                      
+                      <div className="flex gap-2">
+                        <input 
+                          type="number" 
+                          placeholder="New Balance" 
+                          className="input-field py-1 text-sm"
+                          value={balanceUpdate.userId === u.id ? balanceUpdate.amount : ''}
+                          onChange={(e) => setBalanceUpdate({userId: u.id, amount: e.target.value})}
+                        />
+                        <button 
+                          onClick={() => handleUpdateBalance(u.id)}
+                          disabled={loading || balanceUpdate.userId !== u.id}
+                          className="btn-primary py-1 px-4 text-xs whitespace-nowrap"
+                        >
+                          Update
+                        </button>
                       </div>
                     </div>
                   ))}
@@ -1686,6 +1830,14 @@ const TournamentsPage = ({ user, openAuth, lang }: { user: User | null, openAuth
     e.preventDefault();
     if (!user) return openAuth('login');
     
+    const tournament = tournaments.find(t => t.id === registeringId);
+    if (!tournament) return;
+
+    if (user.balance < tournament.entry_fee) {
+      setMessage('Insufficient balance! Please deposit first.');
+      return;
+    }
+    
     const token = localStorage.getItem('ff_token');
     try {
       const res = await fetch(`/api/tournaments/${registeringId}/register`, {
@@ -1694,7 +1846,7 @@ const TournamentsPage = ({ user, openAuth, lang }: { user: User | null, openAuth
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify({ team_name: teamName })
+        body: JSON.stringify({ team_name: teamName || user.username })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
@@ -1704,8 +1856,7 @@ const TournamentsPage = ({ user, openAuth, lang }: { user: User | null, openAuth
         setRegisteringId(null);
         setMessage('');
         setTeamName('');
-        // Refresh tournaments
-        fetch('/api/tournaments').then(res => res.json()).then(setTournaments);
+        window.location.reload();
       }, 2000);
     } catch (err: any) {
       setMessage(err.message);
@@ -1785,6 +1936,8 @@ export default function App() {
   const [authModal, setAuthModal] = useState<{ isOpen: boolean, mode: 'login' | 'signup' }>({ isOpen: false, mode: 'login' });
   const [noticesCount, setNoticesCount] = useState(0);
   const [lang, setLang] = useState<Language>('en');
+  const [footerClickCount, setFooterClickCount] = useState(0);
+  const [showAdminLogin, setShowAdminLogin] = useState(false);
 
   useEffect(() => {
     refreshUser();
@@ -1814,8 +1967,19 @@ export default function App() {
   };
 
   const handleAuthSuccess = (token: string, userData: User) => {
+    // Check if the user is the specific admin
+    const adminEmails = ['yourmeherun007@gmail.com', 'rafiyajannat404@gmail.com'];
+    if (adminEmails.includes(userData.email)) {
+      userData.is_admin = 1;
+    }
     localStorage.setItem('ff_token', token);
     setUser(userData);
+    setAuthModal({ isOpen: false, mode: 'login' });
+
+    // Redirect to admin panel if user is admin and logged in via "Admin Panel Login"
+    if (adminEmails.includes(userData.email) && showAdminLogin) {
+      window.location.href = '/admin';
+    }
   };
 
   const handleLogout = async () => {
@@ -1876,8 +2040,28 @@ export default function App() {
               <Link to="/privacy" className="hover:text-white transition-colors">Privacy Policy</Link>
               <Link to="/contact" className="hover:text-white transition-colors">Contact Us</Link>
             </div>
-            <div className="text-sm text-white/20">
-              © 2026 YOUR MEHERUN GAMING. All rights reserved.
+            <div 
+              className="text-sm text-white/20 cursor-pointer select-none flex items-center gap-2"
+              onClick={() => {
+                const newCount = footerClickCount + 1;
+                setFooterClickCount(newCount);
+                if (newCount >= 5) {
+                  setShowAdminLogin(true);
+                }
+              }}
+            >
+              <span>© 2026 YOUR MEHERUN GAMING. All rights reserved.</span>
+              {showAdminLogin && (
+                <button 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setAuthModal({ isOpen: true, mode: 'login' });
+                  }}
+                  className="ml-4 text-orange-500 hover:text-orange-400 font-bold underline text-xs animate-pulse"
+                >
+                  Admin Panel Login
+                </button>
+              )}
             </div>
           </div>
         </footer>

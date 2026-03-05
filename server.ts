@@ -75,10 +75,14 @@ async function startServer() {
 
   const isAdmin = async (req: any, res: any, next: any) => {
     if (!db) return res.status(503).json({ error: "Database not available" });
+    
+    // Hardcoded admin emails for safety
+    const adminEmails = ['yourmeherun007@gmail.com', 'rafiyajannat404@gmail.com'];
+    
     const userDoc = await db.collection("users").doc(req.user.id).get();
     const userData = userDoc.data();
 
-    if (userData && userData.is_admin === 1) {
+    if (userData && (userData.is_admin === 1 || adminEmails.includes(userData.email))) {
       next();
     } else {
       res.status(403).json({ error: "Admin access required" });
@@ -329,6 +333,124 @@ async function startServer() {
       const snapshot = await db.collection("notices").orderBy("created_at", "desc").limit(10).get();
       const notices = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       res.json(notices);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Admin API Routes
+  app.get("/api/admin/stats", authenticateToken, isAdmin, checkFirebase, async (req, res) => {
+    try {
+      if (!db) throw new Error("Database not initialized");
+      const users = await db.collection("users").get();
+      const tournaments = await db.collection("tournaments").get();
+      const pending = await db.collection("transactions").where("status", "==", "pending").get();
+      
+      res.json({
+        users: users.size,
+        tournaments: tournaments.size,
+        pending: pending.size
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/admin/users", authenticateToken, isAdmin, checkFirebase, async (req, res) => {
+    try {
+      if (!db) throw new Error("Database not initialized");
+      const snapshot = await db.collection("users").get();
+      const users = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      res.json(users);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/admin/users/:id/balance", authenticateToken, isAdmin, checkFirebase, async (req, res) => {
+    const { balance } = req.body;
+    try {
+      if (!db) throw new Error("Database not initialized");
+      await db.collection("users").doc(req.params.id).update({ balance });
+      res.json({ message: "Balance updated" });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/admin/transactions", authenticateToken, isAdmin, checkFirebase, async (req, res) => {
+    try {
+      if (!db) throw new Error("Database not initialized");
+      const snapshot = await db.collection("transactions").where("status", "==", "pending").get();
+      const transactions = await Promise.all(snapshot.docs.map(async (doc) => {
+        const tx = doc.data();
+        const userDoc = await db!.collection("users").doc(tx.user_id).get();
+        const userData = userDoc.data();
+        return {
+          id: doc.id,
+          ...tx,
+          username: userData?.username,
+          email: userData?.email
+        };
+      }));
+      res.json(transactions);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/admin/transactions/:id/:action", authenticateToken, isAdmin, checkFirebase, async (req, res) => {
+    const { id, action } = req.params;
+    try {
+      if (!db) throw new Error("Database not initialized");
+      const txRef = db.collection("transactions").doc(id);
+      const txDoc = await txRef.get();
+      const tx = txDoc.data();
+
+      if (!tx || tx.status !== 'pending') return res.status(400).json({ error: "Invalid transaction" });
+
+      if (action === 'approve') {
+        const userRef = db.collection("users").doc(tx.user_id);
+        const userDoc = await userRef.get();
+        const user = userDoc.data();
+        if (user) {
+          const newBalance = tx.type === 'deposit' ? user.balance + tx.amount : user.balance - tx.amount;
+          await userRef.update({ balance: newBalance });
+        }
+      }
+
+      await txRef.update({ status: action === 'approve' ? 'approved' : 'rejected' });
+      res.json({ message: `Transaction ${action}d` });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/admin/notices", authenticateToken, isAdmin, checkFirebase, async (req, res) => {
+    const { content } = req.body;
+    try {
+      if (!db) throw new Error("Database not initialized");
+      await db.collection("notices").add({
+        content,
+        created_at: admin.firestore.FieldValue.serverTimestamp()
+      });
+      res.json({ message: "Notice posted" });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/admin/tournaments", authenticateToken, isAdmin, checkFirebase, async (req, res) => {
+    const tournamentData = req.body;
+    try {
+      if (!db) throw new Error("Database not initialized");
+      await db.collection("tournaments").add({
+        ...tournamentData,
+        slots_filled: 0,
+        status: 'open',
+        created_at: admin.firestore.FieldValue.serverTimestamp()
+      });
+      res.json({ message: "Tournament created" });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }

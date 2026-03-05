@@ -92,7 +92,7 @@ const Navbar = ({ user, onLogout, openAuth, noticesCount, lang, setLang }: {
             <Target className="w-6 h-6 text-white" />
           </div>
           <div className="flex flex-col">
-            <span className="text-xl font-display font-bold tracking-tighter leading-none">YOURS MEHERUN GAMING</span>
+            <span className="text-xl font-display font-bold tracking-tighter leading-none">YOUR MEHERUN GAMING</span>
             <span className="text-[10px] text-white/40 font-bold tracking-widest uppercase">Elite Free Fire Community</span>
           </div>
         </Link>
@@ -1648,8 +1648,8 @@ export default function App() {
             <div className="flex items-center gap-2">
               <Target className="w-6 h-6 text-orange-600" />
               <div className="flex flex-col">
-                <span className="text-xl font-display font-bold tracking-tighter leading-none">YOURS MEHERUN GAMING</span>
-                <span className="text-[10px] text-white/40 font-bold tracking-widest uppercase">Yours Meherun Gaming</span>
+                <span className="text-xl font-display font-bold tracking-tighter leading-none">YOUR MEHERUN GAMING</span>
+                <span className="text-[10px] text-white/40 font-bold tracking-widest uppercase">YOUR MEHERUN GAMING</span>
               </div>
             </div>
             <div className="flex gap-8 text-sm text-white/40">
@@ -1658,7 +1658,7 @@ export default function App() {
               <Link to="/contact" className="hover:text-white transition-colors">Contact Us</Link>
             </div>
             <div className="text-sm text-white/20">
-              © 2026 Yours Meherun Gaming. All rights reserved.
+              © 2026 YOUR MEHERUN GAMING. All rights reserved.
             </div>
           </div>
         </footer>

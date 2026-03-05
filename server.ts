@@ -16,11 +16,17 @@ const __dirname = path.dirname(__filename);
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 
-if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+let supabase: any = null;
+
+if (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
+  try {
+    supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+  } catch (err) {
+    console.error("Failed to initialize Supabase client:", err);
+  }
+} else {
   console.warn("SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY is missing. Backend will not function correctly.");
 }
-
-const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
 const JWT_SECRET = process.env.JWT_SECRET || "ff-arena-secret-key-123";
 
@@ -29,6 +35,16 @@ async function startServer() {
   const PORT = 3000;
 
   app.use(express.json());
+
+  // Middleware to check if Supabase is initialized
+  const checkSupabase = (req: any, res: any, next: any) => {
+    if (!supabase) {
+      return res.status(503).json({ 
+        error: "Database connection not configured. Please set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in the Secrets panel." 
+      });
+    }
+    next();
+  };
 
   // Auth Middleware
   const authenticateToken = (req: any, res: any, next: any) => {
@@ -59,7 +75,7 @@ async function startServer() {
   };
 
   // API Routes
-  app.post("/api/auth/signup", async (req, res) => {
+  app.post("/api/auth/signup", checkSupabase, async (req, res) => {
     const { username, email, password, ff_id, first_name, last_name } = req.body;
     try {
       const hashedPassword = await bcrypt.hash(password, 10);
@@ -77,7 +93,7 @@ async function startServer() {
     }
   });
 
-  app.post("/api/auth/login", async (req, res) => {
+  app.post("/api/auth/login", checkSupabase, async (req, res) => {
     const { email, password } = req.body;
     const { data: user, error } = await supabase
       .from("users")
@@ -93,7 +109,7 @@ async function startServer() {
     res.json({ token, user: { id: user.id, username: user.username, email: user.email, ff_id: user.ff_id, balance: user.balance, is_admin: user.is_admin } });
   });
 
-  app.get("/api/tournaments", async (req, res) => {
+  app.get("/api/tournaments", checkSupabase, async (req, res) => {
     const { data: tournaments, error } = await supabase
       .from("tournaments")
       .select("*")
@@ -103,7 +119,7 @@ async function startServer() {
     res.json(tournaments);
   });
 
-  app.get("/api/user/profile", authenticateToken, async (req: any, res) => {
+  app.get("/api/user/profile", authenticateToken, checkSupabase, async (req: any, res) => {
     const { data: user, error } = await supabase
       .from("users")
       .select("id, username, email, ff_id, first_name, last_name, balance, profile_picture, is_admin, last_username_change")
@@ -114,7 +130,7 @@ async function startServer() {
     res.json(user);
   });
 
-  app.post("/api/user/profile", authenticateToken, async (req: any, res) => {
+  app.post("/api/user/profile", authenticateToken, checkSupabase, async (req: any, res) => {
     const { username, ff_id, profile_picture, first_name, last_name } = req.body;
     const userId = req.user.id;
     
@@ -168,7 +184,7 @@ async function startServer() {
     }
   });
 
-  app.get("/api/user/registrations", authenticateToken, async (req: any, res) => {
+  app.get("/api/user/registrations", authenticateToken, checkSupabase, async (req: any, res) => {
     const { data: registrations, error } = await supabase
       .from("registrations")
       .select(`
@@ -192,7 +208,7 @@ async function startServer() {
     res.json(flattened);
   });
 
-  app.post("/api/tournaments/:id/register", authenticateToken, async (req: any, res) => {
+  app.post("/api/tournaments/:id/register", authenticateToken, checkSupabase, async (req: any, res) => {
     const { team_name } = req.body;
     const tournamentId = req.params.id;
     
@@ -262,7 +278,7 @@ async function startServer() {
   });
 
   // Wallet Endpoints
-  app.post("/api/wallet/deposit", authenticateToken, async (req: any, res) => {
+  app.post("/api/wallet/deposit", authenticateToken, checkSupabase, async (req: any, res) => {
     const { amount, method, sender_number, transaction_id } = req.body;
     if (amount < 50 || amount > 5000) return res.status(400).json({ error: "Invalid amount" });
     
@@ -278,7 +294,7 @@ async function startServer() {
     }
   });
 
-  app.post("/api/wallet/withdraw", authenticateToken, async (req: any, res) => {
+  app.post("/api/wallet/withdraw", authenticateToken, checkSupabase, async (req: any, res) => {
     const { amount, method, sender_number } = req.body;
     
     try {
@@ -312,7 +328,7 @@ async function startServer() {
     }
   });
 
-  app.get("/api/wallet/transactions", authenticateToken, async (req: any, res) => {
+  app.get("/api/wallet/transactions", authenticateToken, checkSupabase, async (req: any, res) => {
     const { data: transactions, error } = await supabase
       .from("transactions")
       .select("*")
@@ -324,7 +340,7 @@ async function startServer() {
   });
 
   // Notice Endpoints
-  app.get("/api/notices", async (req, res) => {
+  app.get("/api/notices", checkSupabase, async (req, res) => {
     const { data: notices, error } = await supabase
       .from("notices")
       .select("*")
@@ -336,7 +352,7 @@ async function startServer() {
   });
 
   // Admin Endpoints
-  app.get("/api/admin/transactions", authenticateToken, isAdmin, async (req, res) => {
+  app.get("/api/admin/transactions", authenticateToken, isAdmin, checkSupabase, async (req, res) => {
     const { data: transactions, error } = await supabase
       .from("transactions")
       .select(`
@@ -361,7 +377,7 @@ async function startServer() {
     res.json(flattened);
   });
 
-  app.post("/api/admin/transactions/:id/approve", authenticateToken, isAdmin, async (req, res) => {
+  app.post("/api/admin/transactions/:id/approve", authenticateToken, isAdmin, checkSupabase, async (req, res) => {
     const transactionId = req.params.id;
     
     try {
@@ -396,7 +412,7 @@ async function startServer() {
     }
   });
 
-  app.post("/api/admin/transactions/:id/reject", authenticateToken, isAdmin, async (req, res) => {
+  app.post("/api/admin/transactions/:id/reject", authenticateToken, isAdmin, checkSupabase, async (req, res) => {
     const transactionId = req.params.id;
     
     try {
@@ -431,14 +447,14 @@ async function startServer() {
     }
   });
 
-  app.post("/api/admin/notices", authenticateToken, isAdmin, async (req, res) => {
+  app.post("/api/admin/notices", authenticateToken, isAdmin, checkSupabase, async (req, res) => {
     const { content } = req.body;
     const { error } = await supabase.from("notices").insert([{ content }]);
     if (error) return res.status(500).json({ error: error.message });
     res.json({ message: "Notice posted" });
   });
 
-  app.get("/api/admin/users", authenticateToken, isAdmin, async (req, res) => {
+  app.get("/api/admin/users", authenticateToken, isAdmin, checkSupabase, async (req, res) => {
     const { data: users, error } = await supabase
       .from("users")
       .select("id, username, email, ff_id, first_name, last_name, balance, is_admin, created_at")
@@ -448,7 +464,7 @@ async function startServer() {
     res.json(users);
   });
 
-  app.get("/api/admin/stats", authenticateToken, isAdmin, async (req, res) => {
+  app.get("/api/admin/stats", authenticateToken, isAdmin, checkSupabase, async (req, res) => {
     try {
       const { count: userCount } = await supabase.from("users").select("*", { count: 'exact', head: true });
       const { count: tournamentCount } = await supabase.from("tournaments").select("*", { count: 'exact', head: true });

@@ -194,9 +194,19 @@ const AuthModal = ({ isOpen, onClose, mode, setMode, onAuthSuccess, lang }: {
     e.preventDefault();
     setError('');
 
-    if (mode === 'signup' && formData.password !== formData.confirm_password) {
-      setError('Passwords do not match');
-      return;
+    if (mode === 'signup') {
+      if (formData.username.length < 3) {
+        setError('Username must be at least 3 characters long');
+        return;
+      }
+      if (!/^[a-zA-Z0-9]+$/.test(formData.username)) {
+        setError('Username can only contain letters and numbers');
+        return;
+      }
+      if (formData.password !== formData.confirm_password) {
+        setError('Passwords do not match');
+        return;
+      }
     }
 
     setLoading(true);

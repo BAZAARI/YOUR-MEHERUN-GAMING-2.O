@@ -1,3 +1,11 @@
+import { auth } from './firebase';
+import { 
+  signInWithEmailAndPassword, 
+  createUserWithEmailAndPassword, 
+  signOut,
+  onAuthStateChanged,
+  sendEmailVerification
+} from "firebase/auth";
 import React, { useState, useEffect, useRef } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link, useNavigate, Navigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
@@ -6,7 +14,7 @@ import {
   LayoutDashboard, Menu, X, ChevronRight, Target, Zap, 
   Wallet, User as UserIcon, Home, Bell, Copy, Check, 
   ArrowUpRight, ArrowDownLeft, Plus, Send, AlertCircle,
-  Settings, MessageSquare, Clock, Eye, EyeOff, Languages
+  Settings, MessageSquare, Clock, Eye, EyeOff, Languages, Mail
 } from 'lucide-react';
 import { translations, type Language } from './translations';
 import { clsx, type ClassValue } from 'clsx';
@@ -20,6 +28,7 @@ function cn(...inputs: ClassValue[]) {
 // --- Types ---
 interface User {
   id: number;
+  firebase_uid?: string;
   username: string;
   email: string;
   ff_id: string;
@@ -186,9 +195,62 @@ const AuthModal = ({ isOpen, onClose, mode, setMode, onAuthSuccess, lang }: {
     first_name: '',
     last_name: ''
   });
+  const [otpMode, setOtpMode] = useState(false);
+  const [otpSent, setOtpSent] = useState(false);
+  const [otpCode, setOtpCode] = useState('');
+  const [verificationSent, setVerificationSent] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+
+  const handleSendOTP = async () => {
+    if (!formData.email) {
+      setError('Please enter your email first');
+      return;
+    }
+    setLoading(true);
+    setError('');
+    try {
+      const response = await fetch('/api/auth/otp/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: formData.email })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Failed to send OTP');
+      setOtpSent(true);
+      setError('OTP sent to your email!');
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleVerifyOTP = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!otpCode) {
+      setError('Please enter the OTP code');
+      return;
+    }
+    setLoading(true);
+    setError('');
+    try {
+      const response = await fetch('/api/auth/otp/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: formData.email, token: otpCode })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Invalid OTP');
+      onAuthSuccess(data.token, data.user);
+      onClose();
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -212,31 +274,90 @@ const AuthModal = ({ isOpen, onClose, mode, setMode, onAuthSuccess, lang }: {
     setLoading(true);
 
     try {
-      const endpoint = mode === 'login' ? '/api/auth/login' : '/api/auth/signup';
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData)
-      });
-
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Authentication failed');
-
       if (mode === 'login') {
-        onAuthSuccess(data.token, data.user);
+        const userCredential = await signInWithEmailAndPassword(auth, formData.email, formData.password);
+        const user = userCredential.user;
+        
+        if (!user.emailVerified) {
+          setError("Please verify your email address before logging in.");
+          await signOut(auth);
+          return;
+        }
+
+        onAuthSuccess("firebase-token", { 
+          id: 0,
+          firebase_uid: user.uid,
+          username: user.displayName || user.email?.split('@')[0] || 'User', 
+          email: user.email || '', 
+          ff_id: '',
+          balance: 0, 
+          is_admin: 0 
+        });
         onClose();
       } else {
-        setMode('login');
-        setError('Account created! Please login.');
+        const userCredential = await createUserWithEmailAndPassword(auth, formData.email, formData.password);
+        const user = userCredential.user;
+        
+        // Send verification email
+        await sendEmailVerification(user);
+        
+        // Sign out immediately so they aren't logged in automatically
+        await signOut(auth);
+        
+        setVerificationSent(true);
       }
     } catch (err: any) {
-      setError(err.message);
+      console.error("Auth error:", err.code, err.message);
+      if (mode === 'login') {
+        if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
+          setError('Email or password is incorrect.');
+        } else {
+          setError(err.message);
+        }
+      } else {
+        if (err.code === 'auth/email-already-in-use') {
+          setError('User already exists. Please sign in.');
+        } else {
+          setError(err.message);
+        }
+      }
     } finally {
       setLoading(false);
     }
   };
 
   if (!isOpen) return null;
+
+  if (verificationSent) {
+    return (
+      <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
+        <motion.div 
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="bg-[#1a1a1a] border border-white/10 p-8 rounded-3xl w-full max-w-md text-center space-y-6"
+        >
+          <div className="w-20 h-20 bg-orange-500/10 rounded-full flex items-center justify-center mx-auto">
+            <Mail className="w-10 h-10 text-orange-500" />
+          </div>
+          <div className="space-y-2">
+            <h2 className="text-2xl font-bold text-white">Verify Your Email</h2>
+            <p className="text-white/60">
+              We have sent you a verification email to <span className="text-orange-500 font-medium">{formData.email}</span>. Please verify it and log in.
+            </p>
+          </div>
+          <button 
+            onClick={() => {
+              setVerificationSent(false);
+              setMode('login');
+            }}
+            className="btn-primary w-full"
+          >
+            Login
+          </button>
+        </motion.div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
@@ -256,14 +377,80 @@ const AuthModal = ({ isOpen, onClose, mode, setMode, onAuthSuccess, lang }: {
           <X className="w-6 h-6" />
         </button>
         <h2 className="text-3xl font-display font-bold mb-2">
-          {mode === 'login' ? translations[lang].nav.login : 'Create Account'}
+          {otpMode ? 'OTP Login' : (mode === 'login' ? translations[lang].nav.login : 'Create Account')}
         </h2>
         <p className="text-white/60 mb-8">
-          {mode === 'login' ? 'Sign in to access your tournaments' : 'Join the elite Free Fire community'}
+          {otpMode 
+            ? 'Enter your email to receive a login code' 
+            : (mode === 'login' ? 'Sign in to access your tournaments' : 'Join the elite Free Fire community')}
         </p>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {mode === 'signup' && (
+        {error && (
+          <div className={`p-3 rounded-lg mb-6 text-sm flex items-center gap-2 ${error.includes('sent') || error.includes('created') ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-red-500/10 text-red-500 border border-red-500/20'}`}>
+            <AlertCircle className="w-4 h-4" />
+            {error}
+          </div>
+        )}
+
+        <form onSubmit={otpMode ? (otpSent ? handleVerifyOTP : (e) => e.preventDefault()) : handleSubmit} className="space-y-4">
+          <div className="space-y-2">
+            <input 
+              type="email" 
+              required 
+              className="input-field"
+              placeholder={translations[lang].profile.email}
+              value={formData.email}
+              onChange={(e) => setFormData({...formData, email: e.target.value})}
+              disabled={otpSent}
+            />
+          </div>
+
+          {otpMode ? (
+            <>
+              {otpSent && (
+                <div className="space-y-2">
+                  <input 
+                    type="text" 
+                    required 
+                    className="input-field text-center text-2xl tracking-[0.5em] font-mono"
+                    placeholder="000000"
+                    maxLength={6}
+                    value={otpCode}
+                    onChange={(e) => setOtpCode(e.target.value)}
+                  />
+                </div>
+              )}
+              
+              {!otpSent ? (
+                <button 
+                  type="button"
+                  onClick={handleSendOTP}
+                  disabled={loading}
+                  className="btn-primary w-full flex items-center justify-center gap-2"
+                >
+                  {loading ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : 'Send Login Code'}
+                </button>
+              ) : (
+                <button 
+                  type="submit"
+                  disabled={loading}
+                  className="btn-primary w-full flex items-center justify-center gap-2"
+                >
+                  {loading ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : 'Verify & Login'}
+                </button>
+              )}
+              
+              <button 
+                type="button"
+                onClick={() => { setOtpMode(false); setOtpSent(false); setError(''); }}
+                className="w-full text-white/40 text-sm hover:text-white transition-colors"
+              >
+                Back to Password Login
+              </button>
+            </>
+          ) : (
+            <>
+              {mode === 'signup' && (
             <>
               <div className="grid grid-cols-2 gap-4">
                 <input
@@ -346,19 +533,36 @@ const AuthModal = ({ isOpen, onClose, mode, setMode, onAuthSuccess, lang }: {
             </div>
           )}
 
-          {error && <p className={cn("text-sm", error.includes('created') ? "text-green-500" : "text-red-500")}>{error}</p>}
+          {error && <p className={cn("text-sm", error.includes('created') || error.includes('sent') ? "text-green-500" : "text-red-500")}>{error}</p>}
 
           <button type="submit" disabled={loading} className="btn-primary w-full mt-4">
             {loading ? 'Processing...' : (mode === 'login' ? translations[lang].nav.login : 'Sign Up')}
           </button>
-        </form>
+        </>
+      )}
+    </form>
 
-        <p className="mt-6 text-center text-white/60 text-sm">
-          {mode === 'login' ? "Don't have an account? " : "Already have an account? "}
-          <button onClick={() => setMode(mode === 'login' ? 'signup' : 'login')} className="text-orange-500 font-bold hover:underline">
-            {mode === 'login' ? 'Sign Up' : 'Sign In'}
-          </button>
-        </p>
+        <div className="mt-6 text-center space-y-4">
+          <p className="text-white/60 text-sm">
+            {mode === 'login' ? "Don't have an account? " : "Already have an account? "}
+            <button 
+              onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setOtpMode(false); setError(''); }} 
+              className="text-orange-500 font-bold hover:underline"
+            >
+              {mode === 'login' ? 'Sign Up' : 'Sign In'}
+            </button>
+          </p>
+          
+          {mode === 'login' && !otpMode && (
+            <button 
+              type="button"
+              onClick={() => { setOtpMode(true); setError(''); }}
+              className="text-white/40 text-xs hover:text-white transition-colors flex items-center justify-center gap-1 w-full"
+            >
+              <Mail className="w-3 h-3" /> Login with Email OTP
+            </button>
+          )}
+        </div>
       </motion.div>
     </div>
   );
@@ -1614,9 +1818,14 @@ export default function App() {
     setUser(userData);
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem('ff_token');
-    setUser(null);
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      localStorage.removeItem('ff_token');
+      setUser(null);
+    } catch (error) {
+      console.error("Logout error:", error);
+    }
   };
 
   return (

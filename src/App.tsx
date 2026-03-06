@@ -26,6 +26,9 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+// --- Constants ---
+const LOGO_URL = "https://picsum.photos/seed/gaming-logo/200/200"; // Replace this with your actual logo URL
+
 // --- Types ---
 interface User {
   id: number;
@@ -182,8 +185,18 @@ const Navbar = ({ user, onLogout, openAuth, noticesCount, lang, setLang }: {
     )}>
       <div className="max-w-7xl mx-auto flex items-center justify-between">
         <Link to="/" className="flex items-center gap-2 group">
-          <div className="bg-orange-600 p-2 rounded-lg group-hover:rotate-12 transition-transform">
-            <Target className="w-6 h-6 text-white" />
+          <div className="w-10 h-10 rounded-full overflow-hidden group-hover:rotate-12 transition-transform flex items-center justify-center bg-orange-600 relative">
+            <img 
+              src={LOGO_URL} 
+              alt="Logo" 
+              className="w-full h-full object-cover"
+              referrerPolicy="no-referrer"
+              onError={(e) => {
+                e.currentTarget.style.display = 'none';
+                e.currentTarget.parentElement?.classList.add('p-2');
+              }}
+            />
+            <Target className="w-6 h-6 text-white absolute" style={{ zIndex: -1 }} />
           </div>
           <div className="flex flex-col">
             <span className="text-xl font-display font-bold tracking-tighter leading-none">YOUR MEHERUN GAMING</span>
@@ -309,52 +322,39 @@ const AuthModal = ({ isOpen, onClose, mode, setMode, onAuthSuccess, lang, showAd
 
     try {
       if (mode === 'login') {
-        const userCredential = await signInWithEmailAndPassword(auth, formData.email, formData.password);
-        const user = userCredential.user;
-        
-        if (!user.emailVerified) {
-          setError("Please verify your email address before logging in.");
-          await signOut(auth);
-          return;
-        }
-
-        onAuthSuccess("firebase-token", { 
-          id: 0,
-          firebase_uid: user.uid,
-          username: user.displayName || user.email?.split('@')[0] || 'User', 
-          email: user.email || '', 
-          ff_id: '',
-          balance: 0, 
-          is_admin: 0 
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: formData.email, password: formData.password })
         });
+        const data = await res.json();
+        
+        if (!res.ok) throw new Error(data.error || 'Login failed');
+
+        onAuthSuccess(data.token, data.user);
         onClose();
       } else {
-        const userCredential = await createUserWithEmailAndPassword(auth, formData.email, formData.password);
-        const user = userCredential.user;
+        const res = await fetch('/api/auth/signup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            username: formData.username,
+            email: formData.email,
+            password: formData.password,
+            ff_id: formData.ff_id,
+            first_name: formData.first_name,
+            last_name: formData.last_name
+          })
+        });
+        const data = await res.json();
         
-        // Send verification email
-        await sendEmailVerification(user);
-        
-        // Sign out immediately so they aren't logged in automatically
-        await signOut(auth);
+        if (!res.ok) throw new Error(data.error || 'Signup failed');
         
         setVerificationSent(true);
       }
     } catch (err: any) {
-      console.error("Auth error:", err.code, err.message);
-      if (mode === 'login') {
-        if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
-          setError('Email or password is incorrect.');
-        } else {
-          setError(err.message);
-        }
-      } else {
-        if (err.code === 'auth/email-already-in-use') {
-          setError('User already exists. Please sign in.');
-        } else {
-          setError(err.message);
-        }
-      }
+      console.error("Auth error:", err.message);
+      setError(err.message);
     } finally {
       setLoading(false);
     }

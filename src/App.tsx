@@ -26,9 +26,6 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-// --- Constants ---
-const LOGO_URL = "https://picsum.photos/seed/gaming-logo/200/200"; // Replace this with your actual logo URL
-
 // --- Types ---
 interface User {
   id: number;
@@ -160,13 +157,14 @@ const FloatingContact = () => {
 
 // --- Components ---
 
-const Navbar = ({ user, onLogout, openAuth, noticesCount, lang, setLang }: { 
+const Navbar = ({ user, onLogout, openAuth, noticesCount, lang, setLang, logoUrl }: { 
   user: User | null, 
   onLogout: () => void, 
   openAuth: (mode: 'login' | 'signup') => void, 
   noticesCount: number,
   lang: Language,
-  setLang: (l: Language) => void
+  setLang: (l: Language) => void,
+  logoUrl: string
 }) => {
   const [isScrolled, setIsScrolled] = useState(false);
   const location = useLocation();
@@ -187,7 +185,7 @@ const Navbar = ({ user, onLogout, openAuth, noticesCount, lang, setLang }: {
         <Link to="/" className="flex items-center gap-2 group">
           <div className="w-10 h-10 rounded-full overflow-hidden group-hover:rotate-12 transition-transform flex items-center justify-center bg-orange-600 relative">
             <img 
-              src={LOGO_URL} 
+              src={logoUrl} 
               alt="Logo" 
               className="w-full h-full object-cover"
               referrerPolicy="no-referrer"
@@ -276,14 +274,15 @@ const BottomNav = ({ user }: { user: User | null }) => {
   );
 };
 
-const AuthModal = ({ isOpen, onClose, mode, setMode, onAuthSuccess, lang, showAdminLogin }: { 
+const AuthModal = ({ isOpen, onClose, mode, setMode, onAuthSuccess, lang, showAdminLogin, logoUrl }: { 
   isOpen: boolean, 
   onClose: () => void, 
   mode: 'login' | 'signup', 
   setMode: (m: 'login' | 'signup') => void,
   onAuthSuccess: (token: string, user: User) => void,
   lang: Language,
-  showAdminLogin: boolean
+  showAdminLogin: boolean,
+  logoUrl: string
 }) => {
   const [formData, setFormData] = useState({ 
     username: '', 
@@ -302,59 +301,82 @@ const AuthModal = ({ isOpen, onClose, mode, setMode, onAuthSuccess, lang, showAd
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-
-    if (mode === 'signup') {
-      if (formData.username.length < 3) {
-        setError('Username must be at least 3 characters long');
-        return;
-      }
-      if (!/^[a-zA-Z0-9]+$/.test(formData.username)) {
-        setError('Username can only contain letters and numbers');
-        return;
-      }
-      if (formData.password !== formData.confirm_password) {
-        setError('Passwords do not match');
-        return;
-      }
-    }
-
     setLoading(true);
 
     try {
       if (mode === 'login') {
-        const res = await fetch('/api/auth/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: formData.email, password: formData.password })
-        });
-        const data = await res.json();
+        // Use Firebase Client SDK for login
+        const userCredential = await signInWithEmailAndPassword(auth, formData.email, formData.password);
+        const idToken = await userCredential.user.getIdToken();
         
-        if (!res.ok) throw new Error(data.error || 'Login failed');
-
-        onAuthSuccess(data.token, data.user);
-        onClose();
-      } else {
-        const res = await fetch('/api/auth/signup', {
+        // Send ID token to backend to get user profile and JWT
+        const res = await fetch('/api/auth/firebase-login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
+          body: JSON.stringify({ idToken })
+        });
+        
+        const contentType = res.headers.get("content-type");
+        if (contentType && contentType.indexOf("application/json") !== -1) {
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || 'Login failed');
+          onAuthSuccess(data.token, data.user);
+          onClose();
+        } else {
+          const text = await res.text();
+          console.error("Non-JSON response:", text);
+          throw new Error("Server returned an invalid response. Please try again later.");
+        }
+      } else {
+        if (formData.username.length < 3) {
+          setError('Username must be at least 3 characters long');
+          setLoading(false);
+          return;
+        }
+        if (formData.password !== formData.confirm_password) {
+          setError('Passwords do not match');
+          setLoading(false);
+          return;
+        }
+
+        // Use Firebase Client SDK for signup
+        const userCredential = await createUserWithEmailAndPassword(auth, formData.email, formData.password);
+        await sendEmailVerification(userCredential.user);
+        const idToken = await userCredential.user.getIdToken();
+
+        // Send ID token to backend to create user record in Firestore
+        const res = await fetch('/api/auth/firebase-signup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            idToken,
             username: formData.username,
-            email: formData.email,
-            password: formData.password,
             ff_id: formData.ff_id,
             first_name: formData.first_name,
             last_name: formData.last_name
           })
         });
-        const data = await res.json();
-        
-        if (!res.ok) throw new Error(data.error || 'Signup failed');
-        
-        setVerificationSent(true);
+
+        const contentType = res.headers.get("content-type");
+        if (contentType && contentType.indexOf("application/json") !== -1) {
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || 'Signup failed');
+          setVerificationSent(true);
+        } else {
+          throw new Error("Server returned an invalid response. Please try again later.");
+        }
       }
     } catch (err: any) {
       console.error("Auth error:", err.message);
-      setError(err.message);
+      let msg = err.message;
+      if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
+        msg = 'Invalid email or password';
+      } else if (err.code === 'auth/email-already-in-use') {
+        msg = 'Email already in use';
+      } else if (err.code === 'auth/weak-password') {
+        msg = 'Password is too weak';
+      }
+      setError(msg);
     } finally {
       setLoading(false);
     }
@@ -410,10 +432,22 @@ const AuthModal = ({ isOpen, onClose, mode, setMode, onAuthSuccess, lang, showAd
         <button onClick={onClose} className="absolute top-4 right-4 text-white/40 hover:text-white">
           <X className="w-6 h-6" />
         </button>
-        <h2 className="text-3xl font-display font-bold mb-2">
+
+        <div className="flex justify-center mb-6">
+          <div className="w-20 h-20 rounded-full overflow-hidden bg-orange-600 flex items-center justify-center relative shadow-2xl shadow-orange-600/20">
+            <img 
+              src={logoUrl} 
+              alt="Logo" 
+              className="w-full h-full object-cover"
+              referrerPolicy="no-referrer"
+            />
+          </div>
+        </div>
+
+        <h2 className="text-3xl font-display font-bold mb-2 text-center">
           {showAdminLogin ? 'Admin Panel Login' : (mode === 'login' ? translations[lang].nav.login : 'Create Account')}
         </h2>
-        <p className="text-white/60 mb-8">
+        <p className="text-white/60 mb-8 text-center">
           {showAdminLogin ? 'Enter your admin credentials to access the control center' : (mode === 'login' ? 'Sign in to access your tournaments' : 'Join the elite Free Fire community')}
         </p>
 
@@ -1385,14 +1419,19 @@ const NoticePage = () => {
   );
 };
 
-const AdminPanel = ({ user }: { user: User }) => {
+const AdminPanel = ({ user, logoUrl, onLogoUpdate }: { user: User, logoUrl: string, onLogoUpdate: (url: string) => void }) => {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [users, setUsers] = useState<any[]>([]);
   const [notice, setNotice] = useState('');
   const [loading, setLoading] = useState(false);
   const [balanceUpdate, setBalanceUpdate] = useState<{userId: number, amount: string}>({userId: 0, amount: ''});
   const [stats, setStats] = useState({ users: 0, tournaments: 0, pending: 0 });
-  const [activeTab, setActiveTab] = useState<'requests' | 'users' | 'notice' | 'post_match' | 'overview'>('overview');
+  const [activeTab, setActiveTab] = useState<'requests' | 'users' | 'notice' | 'post_match' | 'overview' | 'settings'>('overview');
+  const [newLogoUrl, setNewLogoUrl] = useState(logoUrl);
+
+  useEffect(() => {
+    setNewLogoUrl(logoUrl);
+  }, [logoUrl]);
 
   useEffect(() => {
     const adminEmails = ['yourmeherun007@gmail.com', 'rafiyajannat404@gmail.com', 'yoursmeherun007@gmail.com'];
@@ -1491,6 +1530,28 @@ const AdminPanel = ({ user }: { user: User }) => {
     }
   };
 
+  const handleUpdateSettings = async () => {
+    setLoading(true);
+    const token = localStorage.getItem('ff_token');
+    try {
+      const res = await fetch('/api/admin/settings', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ logo_url: newLogoUrl })
+      });
+      if (!res.ok) throw new Error('Failed to update settings');
+      alert('Settings updated successfully!');
+      onLogoUpdate(newLogoUrl);
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const adminEmails = ['yourmeherun007@gmail.com', 'rafiyajannat404@gmail.com', 'yoursmeherun007@gmail.com'];
   if (!adminEmails.includes(user.email)) return <Navigate to="/" />;
 
@@ -1529,6 +1590,12 @@ const AdminPanel = ({ user }: { user: User }) => {
             className={cn("px-6 py-2 rounded-full font-bold transition-all whitespace-nowrap", activeTab === 'post_match' ? "bg-orange-600 text-white" : "bg-white/5 text-white/40 hover:text-white")}
           >
             Post Match
+          </button>
+          <button 
+            onClick={() => setActiveTab('settings')}
+            className={cn("px-6 py-2 rounded-full font-bold transition-all whitespace-nowrap", activeTab === 'settings' ? "bg-orange-600 text-white" : "bg-white/5 text-white/40 hover:text-white")}
+          >
+            Settings
           </button>
         </div>
 
@@ -1790,6 +1857,41 @@ const AdminPanel = ({ user }: { user: User }) => {
                 </button>
               </div>
             )}
+
+            {activeTab === 'settings' && (
+              <div className="glass-card p-8">
+                <h3 className="text-xl font-bold mb-6">General Settings</h3>
+                <div className="space-y-6">
+                  <div>
+                    <label className="block text-sm text-white/40 font-bold uppercase mb-2">Logo URL</label>
+                    <div className="flex gap-4">
+                      <input 
+                        type="text" 
+                        className="input-field flex-1" 
+                        value={newLogoUrl}
+                        onChange={(e) => setNewLogoUrl(e.target.value)}
+                        placeholder="https://example.com/logo.png"
+                      />
+                      <button 
+                        onClick={handleUpdateSettings}
+                        disabled={loading}
+                        className="btn-primary px-8"
+                      >
+                        {loading ? 'Saving...' : 'Save'}
+                      </button>
+                    </div>
+                    <p className="mt-2 text-xs text-white/40 italic">Enter the direct URL of your logo image. It will be displayed in the Navbar and browser tab.</p>
+                  </div>
+                  
+                  <div className="pt-6 border-t border-white/5">
+                    <label className="block text-sm text-white/40 font-bold uppercase mb-4">Preview</label>
+                    <div className="w-20 h-20 rounded-full overflow-hidden bg-orange-600 flex items-center justify-center">
+                      <img src={newLogoUrl} alt="Preview" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="space-y-8">
@@ -2044,6 +2146,22 @@ export default function App() {
   const [footerClickCount, setFooterClickCount] = useState(0);
   const [showAdminLogin, setShowAdminLogin] = useState(() => localStorage.getItem('ff_admin_login') === 'true');
   const [redirectPath, setRedirectPath] = useState<string | null>(null);
+  const [logoUrl, setLogoUrl] = useState('https://picsum.photos/seed/gaming-logo/200/200');
+
+  useEffect(() => {
+    fetch('/api/settings')
+      .then(res => res.json())
+      .then(data => {
+        if (data.logo_url) setLogoUrl(data.logo_url);
+      });
+  }, []);
+
+  useEffect(() => {
+    const link = document.querySelector("link[rel~='icon']") as HTMLLinkElement;
+    if (link) {
+      link.href = logoUrl;
+    }
+  }, [logoUrl]);
 
   useEffect(() => {
     localStorage.setItem('ff_lang', lang);
@@ -2129,6 +2247,7 @@ export default function App() {
           noticesCount={noticesCount}
           lang={lang}
           setLang={setLang}
+          logoUrl={logoUrl}
         />
 
         <Routes>
@@ -2137,7 +2256,7 @@ export default function App() {
           <Route path="/wallet" element={isInitialLoad ? null : (user ? <WalletPage user={user} refreshUser={refreshUser} lang={lang} /> : <Navigate to="/" />)} />
           <Route path="/profile" element={isInitialLoad ? null : (user ? <ProfilePage user={user} onLogout={handleLogout} refreshUser={refreshUser} lang={lang} /> : <Navigate to="/" />)} />
           <Route path="/notices" element={<NoticePage />} />
-          <Route path="/admin" element={isInitialLoad ? <div className="pt-32 text-center text-white/40">Loading...</div> : (user ? <AdminPanel user={user} /> : <Navigate to="/" />)} />
+          <Route path="/admin" element={isInitialLoad ? <div className="pt-32 text-center text-white/40">Loading...</div> : (user ? <AdminPanel user={user} logoUrl={logoUrl} onLogoUpdate={setLogoUrl} /> : <Navigate to="/" />)} />
           <Route path="/dashboard" element={isInitialLoad ? null : (user ? <Dashboard user={user} /> : <Navigate to="/" />)} />
           <Route path="/leaderboard" element={<div className="pt-32 text-center text-white/40">Leaderboard coming soon...</div>} />
         </Routes>
@@ -2158,6 +2277,7 @@ export default function App() {
           onAuthSuccess={handleAuthSuccess}
           lang={lang}
           showAdminLogin={showAdminLogin}
+          logoUrl={logoUrl}
         />
 
         <footer className="hidden md:block border-t border-white/10 py-12 px-6 mt-20">

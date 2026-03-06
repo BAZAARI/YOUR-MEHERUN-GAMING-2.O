@@ -104,6 +104,71 @@ async function startServer() {
   });
 
   // API Routes
+  app.post("/api/auth/firebase-signup", checkFirebase, async (req, res) => {
+    const { idToken, username, ff_id, first_name, last_name } = req.body;
+    try {
+      if (!auth || !db) throw new Error("Firebase not initialized");
+      
+      // Verify the ID token
+      const decodedToken = await auth.verifyIdToken(idToken);
+      const uid = decodedToken.uid;
+      const email = decodedToken.email;
+
+      // Create user in Firestore
+      await db.collection("users").doc(uid).set({
+        id: uid,
+        username,
+        email,
+        ff_id,
+        first_name,
+        last_name,
+        balance: 0,
+        is_admin: 0,
+        created_at: admin.firestore.FieldValue.serverTimestamp()
+      });
+
+      res.status(201).json({ message: "User record created", id: uid });
+    } catch (error: any) {
+      console.error("Firebase Signup error:", error);
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/auth/firebase-login", checkFirebase, async (req, res) => {
+    const { idToken } = req.body;
+    try {
+      if (!auth || !db) throw new Error("Firebase not initialized");
+      
+      // Verify the ID token
+      const decodedToken = await auth.verifyIdToken(idToken);
+      const uid = decodedToken.uid;
+
+      const userDoc = await db.collection("users").doc(uid).get();
+      
+      if (!userDoc.exists) {
+        return res.status(404).json({ error: "User record not found in database. Please sign up again." });
+      }
+
+      const user = userDoc.data();
+      const token = jwt.sign({ id: uid, username: user?.username }, JWT_SECRET, { expiresIn: '24h' });
+      
+      res.json({ 
+        token, 
+        user: { 
+          id: uid, 
+          username: user?.username, 
+          email: user?.email, 
+          ff_id: user?.ff_id, 
+          balance: user?.balance, 
+          is_admin: user?.is_admin 
+        } 
+      });
+    } catch (error: any) {
+      console.error("Firebase Login error:", error);
+      res.status(401).json({ error: "Authentication failed: " + error.message });
+    }
+  });
+
   app.post("/api/auth/signup", checkFirebase, async (req, res) => {
     const { username, email, password, ff_id, first_name, last_name } = req.body;
     try {
@@ -473,6 +538,33 @@ async function startServer() {
         created_at: admin.firestore.FieldValue.serverTimestamp()
       });
       res.json({ message: "Tournament created" });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/settings", async (req, res) => {
+    try {
+      if (!db) throw new Error("Database not initialized");
+      const doc = await db.collection("settings").doc("general").get();
+      if (!doc.exists) {
+        return res.json({ logo_url: "https://picsum.photos/seed/gaming-logo/200/200" });
+      }
+      res.json(doc.data());
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/admin/settings", authenticateToken, isAdmin, checkFirebase, async (req, res) => {
+    const { logo_url } = req.body;
+    try {
+      if (!db) throw new Error("Database not initialized");
+      await db.collection("settings").doc("general").set({
+        logo_url,
+        updated_at: admin.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
+      res.json({ message: "Settings updated" });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }

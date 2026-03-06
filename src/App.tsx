@@ -178,13 +178,14 @@ const BottomNav = ({ user }: { user: User | null }) => {
   );
 };
 
-const AuthModal = ({ isOpen, onClose, mode, setMode, onAuthSuccess, lang }: { 
+const AuthModal = ({ isOpen, onClose, mode, setMode, onAuthSuccess, lang, showAdminLogin }: { 
   isOpen: boolean, 
   onClose: () => void, 
   mode: 'login' | 'signup', 
   setMode: (m: 'login' | 'signup') => void,
   onAuthSuccess: (token: string, user: User) => void,
-  lang: Language
+  lang: Language,
+  showAdminLogin: boolean
 }) => {
   const [formData, setFormData] = useState({ 
     username: '', 
@@ -1933,21 +1934,28 @@ const TournamentsPage = ({ user, openAuth, lang }: { user: User | null, openAuth
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [authModal, setAuthModal] = useState<{ isOpen: boolean, mode: 'login' | 'signup' }>({ isOpen: false, mode: 'login' });
   const [noticesCount, setNoticesCount] = useState(0);
   const [lang, setLang] = useState<Language>('en');
   const [footerClickCount, setFooterClickCount] = useState(0);
   const [showAdminLogin, setShowAdminLogin] = useState(false);
+  const [redirectPath, setRedirectPath] = useState<string | null>(null);
 
   useEffect(() => {
-    refreshUser();
+    const token = localStorage.getItem('ff_token');
+    if (token) {
+      refreshUser().finally(() => setIsInitialLoad(false));
+    } else {
+      setIsInitialLoad(false);
+    }
     fetchNotices();
   }, []);
 
   const refreshUser = () => {
     const token = localStorage.getItem('ff_token');
     if (token) {
-      fetch('/api/user/profile', {
+      return fetch('/api/user/profile', {
         headers: { 'Authorization': `Bearer ${token}` }
       })
       .then(res => {
@@ -1960,6 +1968,7 @@ export default function App() {
         setUser(null);
       });
     }
+    return Promise.resolve();
   };
 
   const fetchNotices = () => {
@@ -1978,7 +1987,7 @@ export default function App() {
 
     // Redirect to admin panel if user is admin and logged in via "Admin Panel Login"
     if (adminEmails.includes(userData.email) && showAdminLogin) {
-      window.location.href = '/admin';
+      setRedirectPath('/admin');
     }
   };
 
@@ -2007,23 +2016,30 @@ export default function App() {
         <Routes>
           <Route path="/" element={<LandingPage user={user} openAuth={(mode) => setAuthModal({ isOpen: true, mode })} lang={lang} />} />
           <Route path="/tournaments" element={<TournamentsPage user={user} openAuth={(mode) => setAuthModal({ isOpen: true, mode })} lang={lang} />} />
-          <Route path="/wallet" element={user ? <WalletPage user={user} refreshUser={refreshUser} lang={lang} /> : <Navigate to="/" />} />
-          <Route path="/profile" element={user ? <ProfilePage user={user} onLogout={handleLogout} refreshUser={refreshUser} lang={lang} /> : <Navigate to="/" />} />
+          <Route path="/wallet" element={isInitialLoad ? null : (user ? <WalletPage user={user} refreshUser={refreshUser} lang={lang} /> : <Navigate to="/" />)} />
+          <Route path="/profile" element={isInitialLoad ? null : (user ? <ProfilePage user={user} onLogout={handleLogout} refreshUser={refreshUser} lang={lang} /> : <Navigate to="/" />)} />
           <Route path="/notices" element={<NoticePage />} />
-          <Route path="/admin" element={user ? <AdminPanel user={user} /> : <Navigate to="/" />} />
-          <Route path="/dashboard" element={user ? <Dashboard user={user} /> : <Navigate to="/" />} />
+          <Route path="/admin" element={isInitialLoad ? <div className="pt-32 text-center text-white/40">Loading...</div> : (user ? <AdminPanel user={user} /> : <Navigate to="/" />)} />
+          <Route path="/dashboard" element={isInitialLoad ? null : (user ? <Dashboard user={user} /> : <Navigate to="/" />)} />
           <Route path="/leaderboard" element={<div className="pt-32 text-center text-white/40">Leaderboard coming soon...</div>} />
         </Routes>
+
+        {redirectPath && <Navigate to={redirectPath} replace />}
+        {redirectPath && setTimeout(() => setRedirectPath(null), 100) && null}
 
         <BottomNav user={user} />
 
         <AuthModal 
           isOpen={authModal.isOpen} 
-          onClose={() => setAuthModal({ ...authModal, isOpen: false })}
+          onClose={() => {
+            setAuthModal({ ...authModal, isOpen: false });
+            setShowAdminLogin(false);
+          }}
           mode={authModal.mode}
           setMode={(mode) => setAuthModal({ ...authModal, mode })}
           onAuthSuccess={handleAuthSuccess}
           lang={lang}
+          showAdminLogin={showAdminLogin}
         />
 
         <footer className="hidden md:block border-t border-white/10 py-12 px-6 mt-20">

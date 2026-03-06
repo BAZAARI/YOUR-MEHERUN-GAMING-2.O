@@ -181,7 +181,16 @@ async function startServer() {
       if (!db) throw new Error("Database not initialized");
       const userDoc = await db.collection("users").doc(req.user.id).get();
       if (!userDoc.exists) return res.status(404).json({ error: "User not found" });
-      res.json(userDoc.data());
+      
+      const userData = userDoc.data();
+      if (userData) {
+        const adminEmails = ['yourmeherun007@gmail.com', 'rafiyajannat404@gmail.com', 'yoursmeherun007@gmail.com'];
+        if (adminEmails.includes(userData.email)) {
+          userData.is_admin = 1;
+        }
+      }
+      
+      res.json(userData);
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -319,12 +328,23 @@ async function startServer() {
   app.get("/api/wallet/transactions", authenticateToken, checkFirebase, async (req: any, res) => {
     try {
       if (!db) throw new Error("Database not initialized");
+      // Remove orderBy from query to avoid composite index requirement
       const snapshot = await db.collection("transactions")
         .where("user_id", "==", req.user.id)
-        .orderBy("created_at", "desc").get();
+        .get();
+      
       const transactions = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      
+      // Sort in memory instead
+      transactions.sort((a: any, b: any) => {
+        const dateA = a.created_at?.toDate?.() || new Date(a.created_at);
+        const dateB = b.created_at?.toDate?.() || new Date(b.created_at);
+        return dateB.getTime() - dateA.getTime();
+      });
+
       res.json(transactions);
     } catch (error: any) {
+      console.error("Fetch transactions error:", error);
       res.status(500).json({ error: error.message });
     }
   });

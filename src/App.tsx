@@ -14,7 +14,8 @@ import {
   LayoutDashboard, Menu, X, ChevronRight, Target, Zap, 
   Wallet, User as UserIcon, Home, Bell, Copy, Check, 
   ArrowUpRight, ArrowDownLeft, Plus, Send, AlertCircle,
-  Settings, MessageSquare, Clock, Eye, EyeOff, Languages, Mail
+  Settings, MessageSquare, Clock, Eye, EyeOff, Languages, Mail,
+  Youtube, Facebook, Instagram
 } from 'lucide-react';
 import { translations, type Language } from './translations';
 import { clsx, type ClassValue } from 'clsx';
@@ -69,6 +70,90 @@ interface Notice {
   content: string;
   created_at: string;
 }
+
+const TikTokIcon = ({ className }: { className?: string }) => (
+  <svg viewBox="0 0 24 24" fill="currentColor" className={className}>
+    <path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-5.2 1.74 2.89 2.89 0 0 1 2.31-4.64 2.93 2.93 0 0 1 .88.13V9.4a6.84 6.84 0 0 0-1-.05A6.33 6.33 0 0 0 5 20.1a6.34 6.34 0 0 0 10.86-4.43v-7a8.16 8.16 0 0 0 4.77 1.52v-3.4a4.85 4.85 0 0 1-1.04-.1z"/>
+  </svg>
+);
+
+const FloatingContact = () => {
+  const [isOpen, setIsOpen] = useState(false);
+
+  const socialLinks = [
+    { 
+      name: 'YouTube', 
+      icon: <Youtube className="w-6 h-6" />, 
+      url: 'https://www.youtube.com/@YourMeherungaming',
+      color: 'bg-red-600'
+    },
+    { 
+      name: 'Facebook', 
+      icon: <Facebook className="w-6 h-6" />, 
+      url: 'https://www.facebook.com/your.meherun.gaming/',
+      color: 'bg-blue-600'
+    },
+    { 
+      name: 'Instagram', 
+      icon: <Instagram className="w-6 h-6" />, 
+      url: 'https://www.instagram.com/yours_meherun_gaming/?hl=en',
+      color: 'bg-gradient-to-tr from-yellow-400 via-red-500 to-purple-600'
+    },
+    { 
+      name: 'TikTok', 
+      icon: <TikTokIcon className="w-6 h-6" />, 
+      url: 'https://www.tiktok.com/@wanted_meherun',
+      color: 'bg-black'
+    },
+  ];
+
+  return (
+    <div className="fixed bottom-6 right-6 z-50 flex flex-col items-center gap-4">
+      <AnimatePresence>
+        {isOpen && (
+          <motion.div 
+            initial={{ opacity: 0, y: 20, scale: 0.8 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 20, scale: 0.8 }}
+            className="flex flex-col gap-3"
+          >
+            {socialLinks.map((link, index) => (
+              <motion.a
+                key={link.name}
+                href={link.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: index * 0.05 }}
+                className={cn(
+                  "w-12 h-12 rounded-full flex items-center justify-center text-white shadow-lg hover:scale-110 transition-transform",
+                  link.color
+                )}
+                title={link.name}
+              >
+                {link.icon}
+              </motion.a>
+            ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
+      
+      <div className="flex flex-col items-center gap-2">
+        <button
+          onClick={() => setIsOpen(!isOpen)}
+          className={cn(
+            "w-14 h-14 rounded-full flex items-center justify-center text-white shadow-2xl transition-all duration-300",
+            isOpen ? "bg-red-500 rotate-90" : "bg-orange-600"
+          )}
+        >
+          {isOpen ? <X className="w-8 h-8" /> : <MessageSquare className="w-8 h-8" />}
+        </button>
+        <span className="text-[10px] font-bold uppercase tracking-widest text-white/40">Contact</span>
+      </div>
+    </div>
+  );
+};
 
 // --- Components ---
 
@@ -1955,10 +2040,18 @@ export default function App() {
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [authModal, setAuthModal] = useState<{ isOpen: boolean, mode: 'login' | 'signup' }>({ isOpen: false, mode: 'login' });
   const [noticesCount, setNoticesCount] = useState(0);
-  const [lang, setLang] = useState<Language>('en');
+  const [lang, setLang] = useState<Language>(() => (localStorage.getItem('ff_lang') as Language) || 'en');
   const [footerClickCount, setFooterClickCount] = useState(0);
-  const [showAdminLogin, setShowAdminLogin] = useState(false);
+  const [showAdminLogin, setShowAdminLogin] = useState(() => localStorage.getItem('ff_admin_login') === 'true');
   const [redirectPath, setRedirectPath] = useState<string | null>(null);
+
+  useEffect(() => {
+    localStorage.setItem('ff_lang', lang);
+  }, [lang]);
+
+  useEffect(() => {
+    localStorage.setItem('ff_admin_login', String(showAdminLogin));
+  }, [showAdminLogin]);
 
   useEffect(() => {
     const token = localStorage.getItem('ff_token');
@@ -1980,7 +2073,14 @@ export default function App() {
         if (res.ok) return res.json();
         throw new Error('Invalid token');
       })
-      .then(setUser)
+      .then(userData => {
+        // Ensure admin flag is set for hardcoded admins
+        const adminEmails = ['yourmeherun007@gmail.com', 'rafiyajannat404@gmail.com', 'yoursmeherun007@gmail.com'];
+        if (adminEmails.includes(userData.email)) {
+          userData.is_admin = 1;
+        }
+        setUser(userData);
+      })
       .catch(() => {
         localStorage.removeItem('ff_token');
         setUser(null);
@@ -2099,6 +2199,8 @@ export default function App() {
             </div>
           </div>
         </footer>
+
+        <FloatingContact />
       </div>
     </Router>
   );

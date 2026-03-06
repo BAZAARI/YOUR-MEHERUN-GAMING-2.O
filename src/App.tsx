@@ -1,4 +1,4 @@
-import { auth } from './firebase';
+import { auth, db } from './firebase';
 import { 
   signInWithEmailAndPassword, 
   createUserWithEmailAndPassword, 
@@ -6,6 +6,7 @@ import {
   onAuthStateChanged,
   sendEmailVerification
 } from "firebase/auth";
+import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 import React, { useState, useEffect, useRef } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link, useNavigate, Navigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
@@ -305,28 +306,33 @@ const AuthModal = ({ isOpen, onClose, mode, setMode, onAuthSuccess, lang, showAd
 
     try {
       if (mode === 'login') {
-        // Use Firebase Client SDK for login
+        // Step 1: Firebase Auth Login
         const userCredential = await signInWithEmailAndPassword(auth, formData.email, formData.password);
+        const uid = userCredential.user.uid;
         const idToken = await userCredential.user.getIdToken();
         
-        // Send ID token to backend to get user profile and JWT
-        const res = await fetch('/api/auth/firebase-login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ idToken })
-        });
+        // Step 2: Fetch User Data directly from Firestore (Bypassing backend for initial login)
+        const userDoc = await getDoc(doc(db, "users", uid));
         
-        const contentType = res.headers.get("content-type");
-        if (contentType && contentType.indexOf("application/json") !== -1) {
-          const data = await res.json();
-          if (!res.ok) throw new Error(data.error || 'Login failed');
-          onAuthSuccess(data.token, data.user);
-          onClose();
-        } else {
-          const text = await res.text();
-          console.error("Non-JSON response:", text);
-          throw new Error("Server returned an invalid response. Please try again later.");
+        if (!userDoc.exists()) {
+          throw new Error("User record not found in database. Please sign up again.");
         }
+
+        const userData = userDoc.data() as any;
+        const user: User = {
+          id: uid as any,
+          username: userData.username,
+          email: userData.email,
+          ff_id: userData.ff_id,
+          balance: userData.balance || 0,
+          is_admin: userData.is_admin || 0,
+          first_name: userData.first_name,
+          last_name: userData.last_name,
+          profile_picture: userData.profile_picture
+        };
+
+        onAuthSuccess(idToken, user);
+        onClose();
       } else {
         if (formData.username.length < 3) {
           setError('Username must be at least 3 characters long');
@@ -339,42 +345,33 @@ const AuthModal = ({ isOpen, onClose, mode, setMode, onAuthSuccess, lang, showAd
           return;
         }
 
-        // Use Firebase Client SDK for signup
+        // Step 1: Firebase Auth Signup
         const userCredential = await createUserWithEmailAndPassword(auth, formData.email, formData.password);
+        const uid = userCredential.user.uid;
         await sendEmailVerification(userCredential.user);
-        const idToken = await userCredential.user.getIdToken();
-
-        // Send ID token to backend to create user record in Firestore
-        const res = await fetch('/api/auth/firebase-signup', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            idToken,
-            username: formData.username,
-            ff_id: formData.ff_id,
-            first_name: formData.first_name,
-            last_name: formData.last_name
-          })
+        
+        // Step 2: Create User Record in Firestore directly
+        await setDoc(doc(db, "users", uid), {
+          id: uid,
+          username: formData.username,
+          email: formData.email,
+          ff_id: formData.ff_id,
+          first_name: formData.first_name,
+          last_name: formData.last_name,
+          balance: 0,
+          is_admin: 0,
+          created_at: serverTimestamp()
         });
 
-        const contentType = res.headers.get("content-type");
-        if (contentType && contentType.indexOf("application/json") !== -1) {
-          const data = await res.json();
-          if (!res.ok) throw new Error(data.error || 'Signup failed');
-          setVerificationSent(true);
-        } else {
-          throw new Error("Server returned an invalid response. Please try again later.");
-        }
+        setVerificationSent(true);
       }
     } catch (err: any) {
-      console.error("Auth error:", err.message);
+      console.error("Auth error:", err);
       let msg = err.message;
       if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
         msg = 'Invalid email or password';
       } else if (err.code === 'auth/email-already-in-use') {
         msg = 'Email already in use';
-      } else if (err.code === 'auth/weak-password') {
-        msg = 'Password is too weak';
       }
       setError(msg);
     } finally {
@@ -2172,39 +2169,79 @@ export default function App() {
   }, [showAdminLogin]);
 
   useEffect(() => {
-    const token = localStorage.getItem('ff_token');
-    if (token) {
-      refreshUser().finally(() => setIsInitialLoad(false));
-    } else {
-      setIsInitialLoad(false);
-    }
-    fetchNotices();
-  }, []);
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser) {
+        const idToken = await firebaseUser.getIdToken();
+        localStorage.setItem('ff_token', idToken);
+        
+        // Fetch user data from Firestore
+        try {
+          const userDoc = await getDoc(doc(db, "users", firebaseUser.uid));
+          if (userDoc.exists()) {
+            const userData = userDoc.data() as any;
+            const user: User = {
+              id: firebaseUser.uid as any,
+              username: userData.username,
+              email: userData.email,
+              ff_id: userData.ff_id,
+              balance: userData.balance || 0,
+              is_admin: userData.is_admin || 0,
+              first_name: userData.first_name,
+              last_name: userData.last_name,
+              profile_picture: userData.profile_picture
+            };
 
-  const refreshUser = () => {
-    const token = localStorage.getItem('ff_token');
-    if (token) {
-      return fetch('/api/user/profile', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      })
-      .then(res => {
-        if (res.ok) return res.json();
-        throw new Error('Invalid token');
-      })
-      .then(userData => {
-        // Ensure admin flag is set for hardcoded admins
-        const adminEmails = ['yourmeherun007@gmail.com', 'rafiyajannat404@gmail.com', 'yoursmeherun007@gmail.com'];
-        if (adminEmails.includes(userData.email)) {
-          userData.is_admin = 1;
+            // Hardcoded admins
+            const adminEmails = ['yourmeherun007@gmail.com', 'rafiyajannat404@gmail.com', 'yoursmeherun007@gmail.com'];
+            if (adminEmails.includes(user.email)) {
+              user.is_admin = 1;
+            }
+            
+            setUser(user);
+          }
+        } catch (err) {
+          console.error("Error fetching user data on auth change:", err);
         }
-        setUser(userData);
-      })
-      .catch(() => {
+      } else {
         localStorage.removeItem('ff_token');
         setUser(null);
-      });
+      }
+      setIsInitialLoad(false);
+    });
+
+    fetchNotices();
+    return () => unsubscribe();
+  }, []);
+
+  const refreshUser = async () => {
+    if (!auth.currentUser) return;
+    
+    try {
+      const userDoc = await getDoc(doc(db, "users", auth.currentUser.uid));
+      if (userDoc.exists()) {
+        const userData = userDoc.data() as any;
+        const user: User = {
+          id: auth.currentUser.uid as any,
+          username: userData.username,
+          email: userData.email,
+          ff_id: userData.ff_id,
+          balance: userData.balance || 0,
+          is_admin: userData.is_admin || 0,
+          first_name: userData.first_name,
+          last_name: userData.last_name,
+          profile_picture: userData.profile_picture
+        };
+
+        const adminEmails = ['yourmeherun007@gmail.com', 'rafiyajannat404@gmail.com', 'yoursmeherun007@gmail.com'];
+        if (adminEmails.includes(user.email)) {
+          user.is_admin = 1;
+        }
+        
+        setUser(user);
+      }
+    } catch (err) {
+      console.error("Error refreshing user data:", err);
     }
-    return Promise.resolve();
   };
 
   const fetchNotices = () => {

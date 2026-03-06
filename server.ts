@@ -47,7 +47,13 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.use(express.json());
+  app.use(express.json({ limit: '1mb' }));
+
+  // Logging middleware
+  app.use((req, res, next) => {
+    console.log(`${req.method} ${req.url}`);
+    next();
+  });
 
   // Middleware to check if Firebase is initialized
   const checkFirebase = (req: any, res: any, next: any) => {
@@ -59,18 +65,22 @@ async function startServer() {
     next();
   };
 
-  // Auth Middleware
-  const authenticateToken = (req: any, res: any, next: any) => {
+  // Auth Middleware (Using Firebase ID Tokens)
+  const authenticateToken = async (req: any, res: any, next: any) => {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
 
     if (!token) return res.status(401).json({ error: "Unauthorized" });
 
-    jwt.verify(token, JWT_SECRET, (err: any, user: any) => {
-      if (err) return res.status(403).json({ error: "Forbidden" });
-      req.user = user;
+    try {
+      if (!auth) throw new Error("Firebase Admin Auth not initialized");
+      const decodedToken = await auth.verifyIdToken(token);
+      req.user = { id: decodedToken.uid, email: decodedToken.email };
       next();
-    });
+    } catch (err: any) {
+      console.error("Token verification error:", err.message);
+      return res.status(403).json({ error: "Forbidden: " + err.message });
+    }
   };
 
   const isAdmin = async (req: any, res: any, next: any) => {
@@ -101,6 +111,14 @@ async function startServer() {
     } catch (error: any) {
       res.status(400).json({ error: error.message });
     }
+  });
+
+  app.get("/api/test", (req, res) => {
+    res.json({ message: "API is working" });
+  });
+
+  app.post("/api/test-post", (req, res) => {
+    res.json({ message: "POST works", body: req.body });
   });
 
   // API Routes
@@ -136,24 +154,32 @@ async function startServer() {
 
   app.post("/api/auth/firebase-login", checkFirebase, async (req, res) => {
     const { idToken } = req.body;
+    console.log("Firebase login attempt received");
     try {
       if (!auth || !db) throw new Error("Firebase not initialized");
       
+      if (!idToken) {
+        return res.status(400).json({ error: "ID Token is missing" });
+      }
+
       // Verify the ID token
+      console.log("Verifying ID token...");
       const decodedToken = await auth.verifyIdToken(idToken);
       const uid = decodedToken.uid;
+      console.log("Token verified for UID:", uid);
 
       const userDoc = await db.collection("users").doc(uid).get();
       
       if (!userDoc.exists) {
+        console.log("User record not found in Firestore for UID:", uid);
         return res.status(404).json({ error: "User record not found in database. Please sign up again." });
       }
 
       const user = userDoc.data();
-      const token = jwt.sign({ id: uid, username: user?.username }, JWT_SECRET, { expiresIn: '24h' });
       
+      console.log("Login successful, sending response");
       res.json({ 
-        token, 
+        token: idToken, // Return the same ID token to be used on client
         user: { 
           id: uid, 
           username: user?.username, 
@@ -570,6 +596,12 @@ async function startServer() {
     }
   });
 
+  // Catch-all for API routes to prevent HTML fallback
+  app.all("/api/*", (req, res) => {
+    console.log(`API 404: ${req.method} ${req.url}`);
+    res.status(404).json({ error: `API route not found: ${req.method} ${req.url}` });
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
@@ -586,6 +618,12 @@ async function startServer() {
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
+  });
+
+  // Error handler
+  app.use((err: any, req: any, res: any, next: any) => {
+    console.error("Unhandled Error:", err);
+    res.status(500).json({ error: "Internal Server Error: " + err.message });
   });
 }
 

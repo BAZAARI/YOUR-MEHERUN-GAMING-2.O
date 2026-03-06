@@ -1357,17 +1357,29 @@ const AdminPanel = ({ user }: { user: User }) => {
     if (!notice) return;
     setLoading(true);
     const token = localStorage.getItem('ff_token');
-    await fetch('/api/admin/notices', {
-      method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      },
-      body: JSON.stringify({ content: notice })
-    });
-    setNotice('');
-    setLoading(false);
-    alert('Notice posted!');
+    try {
+      const res = await fetch('/api/admin/notices', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ content: notice })
+      });
+      
+      const data = await res.json();
+      
+      if (res.ok) {
+        setNotice('');
+        alert('Notice posted!');
+      } else {
+        alert('Error: ' + (data.error || 'Failed to post notice'));
+      }
+    } catch (err: any) {
+      alert('Failed to post notice: ' + err.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleUpdateBalance = async (userId: number) => {
@@ -1508,13 +1520,19 @@ const AdminPanel = ({ user }: { user: User }) => {
                       },
                       body: JSON.stringify(formData)
                     });
+                    
+                    const data = await res.json();
+                    
                     if (res.ok) {
                       alert('Match posted successfully!');
                       target.reset();
                       fetchStats();
+                    } else {
+                      alert('Error: ' + (data.error || 'Failed to post match'));
                     }
-                  } catch (err) {
-                    alert('Failed to post match');
+                  } catch (err: any) {
+                    console.error('Post match error:', err);
+                    alert('Failed to post match: ' + err.message);
                   } finally {
                     setLoading(false);
                   }

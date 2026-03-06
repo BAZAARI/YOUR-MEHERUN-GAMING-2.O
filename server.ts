@@ -275,7 +275,9 @@ async function startServer() {
       if (!user) return res.status(404).json({ error: "User not found" });
 
       if (tournament.entry_fee !== "Free") {
-        const fee = parseInt(tournament.entry_fee.replace(/[^0-9]/g, ''));
+        const fee = typeof tournament.entry_fee === 'number' 
+          ? tournament.entry_fee 
+          : parseInt(String(tournament.entry_fee).replace(/[^0-9]/g, ''));
         if (user.balance < fee) return res.status(400).json({ error: "Insufficient balance" });
         await userRef.update({ balance: user.balance - fee });
       }

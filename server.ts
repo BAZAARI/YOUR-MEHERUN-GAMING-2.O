@@ -77,7 +77,7 @@ async function startServer() {
     if (!db) return res.status(503).json({ error: "Database not available" });
     
     // Hardcoded admin emails for safety
-    const adminEmails = ['yourmeherun007@gmail.com', 'rafiyajannat404@gmail.com'];
+    const adminEmails = ['yourmeherun007@gmail.com', 'rafiyajannat404@gmail.com', 'yoursmeherun007@gmail.com'];
     
     const userDoc = await db.collection("users").doc(req.user.id).get();
     const userData = userDoc.data();

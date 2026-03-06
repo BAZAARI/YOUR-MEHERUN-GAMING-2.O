@@ -325,10 +325,10 @@ const AuthModal = ({ isOpen, onClose, mode, setMode, onAuthSuccess, lang }: {
           <X className="w-6 h-6" />
         </button>
         <h2 className="text-3xl font-display font-bold mb-2">
-          {mode === 'login' ? translations[lang].nav.login : 'Create Account'}
+          {showAdminLogin ? 'Admin Panel Login' : (mode === 'login' ? translations[lang].nav.login : 'Create Account')}
         </h2>
         <p className="text-white/60 mb-8">
-          {mode === 'login' ? 'Sign in to access your tournaments' : 'Join the elite Free Fire community'}
+          {showAdminLogin ? 'Enter your admin credentials to access the control center' : (mode === 'login' ? 'Sign in to access your tournaments' : 'Join the elite Free Fire community')}
         </p>
 
         {error && (
@@ -423,7 +423,7 @@ const AuthModal = ({ isOpen, onClose, mode, setMode, onAuthSuccess, lang }: {
           )}
 
           <button type="submit" disabled={loading} className="btn-primary w-full mt-4">
-            {loading ? 'Processing...' : (mode === 'login' ? translations[lang].nav.login : 'Sign Up')}
+            {loading ? 'Processing...' : (showAdminLogin ? 'Log in to the admin panel' : (mode === 'login' ? translations[lang].nav.login : 'Sign Up'))}
           </button>
         </form>
 
@@ -1309,7 +1309,7 @@ const AdminPanel = ({ user }: { user: User }) => {
   const [activeTab, setActiveTab] = useState<'requests' | 'users' | 'notice' | 'post_match' | 'overview'>('overview');
 
   useEffect(() => {
-    const adminEmails = ['yourmeherun007@gmail.com', 'rafiyajannat404@gmail.com'];
+    const adminEmails = ['yourmeherun007@gmail.com', 'rafiyajannat404@gmail.com', 'yoursmeherun007@gmail.com'];
     if (!adminEmails.includes(user.email)) return;
     fetchTransactions();
     fetchStats();
@@ -1393,7 +1393,7 @@ const AdminPanel = ({ user }: { user: User }) => {
     }
   };
 
-  const adminEmails = ['yourmeherun007@gmail.com', 'rafiyajannat404@gmail.com'];
+  const adminEmails = ['yourmeherun007@gmail.com', 'rafiyajannat404@gmail.com', 'yoursmeherun007@gmail.com'];
   if (!adminEmails.includes(user.email)) return <Navigate to="/" />;
 
   return (
@@ -1968,7 +1968,7 @@ export default function App() {
 
   const handleAuthSuccess = (token: string, userData: User) => {
     // Check if the user is the specific admin
-    const adminEmails = ['yourmeherun007@gmail.com', 'rafiyajannat404@gmail.com'];
+    const adminEmails = ['yourmeherun007@gmail.com', 'rafiyajannat404@gmail.com', 'yoursmeherun007@gmail.com'];
     if (adminEmails.includes(userData.email)) {
       userData.is_admin = 1;
     }

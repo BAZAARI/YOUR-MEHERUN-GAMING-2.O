@@ -30,7 +30,7 @@ function cn(...inputs: ClassValue[]) {
 
 // --- Types ---
 interface User {
-  id: number;
+  id: string;
   firebase_uid?: string;
   username: string;
   email: string;
@@ -44,7 +44,7 @@ interface User {
 }
 
 interface Tournament {
-  id: number;
+  id: string;
   title: string;
   description: string;
   prize_pool: string;
@@ -53,10 +53,12 @@ interface Tournament {
   slots_total: number;
   slots_filled: number;
   status: string;
+  type?: string;
+  mode?: string;
 }
 
 interface Transaction {
-  id: number;
+  id: string;
   type: 'deposit' | 'withdraw';
   amount: number;
   method: string;
@@ -68,7 +70,7 @@ interface Transaction {
 }
 
 interface Notice {
-  id: number;
+  id: string;
   content: string;
   created_at: string;
 }
@@ -344,7 +346,8 @@ const AuthModal = ({ isOpen, onClose, mode, setMode, onAuthSuccess, lang, showAd
 
       // Sign in with Custom Token
       const userCredential = await signInWithCustomToken(auth, data.token);
-      onAuthSuccess(data.token, data.user);
+      const idToken = await userCredential.user.getIdToken();
+      onAuthSuccess(idToken, data.user);
       onClose();
     } catch (err: any) {
       setError(err.message);
@@ -674,7 +677,7 @@ const AuthModal = ({ isOpen, onClose, mode, setMode, onAuthSuccess, lang, showAd
   );
 };
 
-const TournamentCard: React.FC<{ tournament: Tournament, onRegister: (id: number) => void, lang: Language }> = ({ tournament, onRegister, lang }) => {
+const TournamentCard: React.FC<{ tournament: Tournament, onRegister: (id: string) => void, lang: Language }> = ({ tournament, onRegister, lang }) => {
   const t = translations[lang].hero;
   const [timeLeft, setTimeLeft] = useState<string>('');
 
@@ -1580,7 +1583,7 @@ const AdminPanel = ({ user, logoUrl, onLogoUpdate, onSettingsUpdate }: { user: U
   const [loading, setLoading] = useState(false);
   const [noticeLoading, setNoticeLoading] = useState(false);
   const [matchLoading, setMatchLoading] = useState(false);
-  const [balanceUpdate, setBalanceUpdate] = useState<{userId: number, amount: string}>({userId: 0, amount: ''});
+  const [balanceUpdate, setBalanceUpdate] = useState<{userId: string, amount: string}>({userId: '', amount: ''});
   const [stats, setStats] = useState({ users: 0, tournaments: 0, pending: 0 });
   const [activeTab, setActiveTab] = useState<'requests' | 'users' | 'notice' | 'post_match' | 'overview' | 'settings'>('overview');
   const [newLogoUrl, setNewLogoUrl] = useState(logoUrl);
@@ -1626,7 +1629,7 @@ const AdminPanel = ({ user, logoUrl, onLogoUpdate, onSettingsUpdate }: { user: U
 
   useEffect(() => {
     const adminEmails = ['yourmeherun007@gmail.com', 'rafiyajannat404@gmail.com', 'yoursmeherun007@gmail.com'];
-    if (!adminEmails.includes(user.email)) return;
+    if (!user.email || !adminEmails.includes(user.email.toLowerCase())) return;
     fetchTransactions();
     fetchStats();
     fetchUsers();
@@ -1659,7 +1662,7 @@ const AdminPanel = ({ user, logoUrl, onLogoUpdate, onSettingsUpdate }: { user: U
     setTransactions(data);
   };
 
-  const handleAction = async (id: number, action: 'approve' | 'reject') => {
+  const handleAction = async (id: string, action: 'approve' | 'reject') => {
     const token = localStorage.getItem('ff_token');
     await fetch(`/api/admin/transactions/${id}/${action}`, {
       method: 'POST',
@@ -1698,7 +1701,7 @@ const AdminPanel = ({ user, logoUrl, onLogoUpdate, onSettingsUpdate }: { user: U
     }
   };
 
-  const handleUpdateBalance = async (userId: number) => {
+  const handleUpdateBalance = async (userId: string) => {
     if (!balanceUpdate.amount) return;
     setLoading(true);
     const token = localStorage.getItem('ff_token');
@@ -1791,7 +1794,7 @@ const AdminPanel = ({ user, logoUrl, onLogoUpdate, onSettingsUpdate }: { user: U
   };
 
   const adminEmails = ['yourmeherun007@gmail.com', 'rafiyajannat404@gmail.com', 'yoursmeherun007@gmail.com'];
-  if (!adminEmails.includes(user.email)) return <Navigate to="/" />;
+  if (!user.email || !adminEmails.includes(user.email.toLowerCase())) return <Navigate to="/" />;
 
   return (
     <div className="pt-32 pb-32 px-6">
@@ -2357,7 +2360,7 @@ const Dashboard = ({ user }: { user: User }) => {
 
 const TournamentsPage = ({ user, openAuth, lang }: { user: User | null, openAuth: (mode: 'login' | 'signup') => void, lang: Language }) => {
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
-  const [registeringId, setRegisteringId] = useState<number | null>(null);
+  const [registeringId, setRegisteringId] = useState<string | null>(null);
   const [teamName, setTeamName] = useState('');
   const [message, setMessage] = useState('');
   const tc = translations[lang].common;
@@ -2596,7 +2599,7 @@ export default function App() {
   const handleAuthSuccess = (token: string, userData: User) => {
     // Check if the user is the specific admin
     const adminEmails = ['yourmeherun007@gmail.com', 'rafiyajannat404@gmail.com', 'yoursmeherun007@gmail.com'];
-    if (adminEmails.includes(userData.email)) {
+    if (userData.email && adminEmails.includes(userData.email.toLowerCase())) {
       userData.is_admin = 1;
     }
     localStorage.setItem('ff_token', token);
@@ -2604,7 +2607,7 @@ export default function App() {
     setAuthModal({ isOpen: false, mode: 'login' });
 
     // Redirect to admin panel if user is admin and logged in via "Admin Panel Login"
-    if (adminEmails.includes(userData.email) && showAdminLogin) {
+    if (userData.email && adminEmails.includes(userData.email.toLowerCase()) && showAdminLogin) {
       setRedirectPath('/admin');
     }
   };

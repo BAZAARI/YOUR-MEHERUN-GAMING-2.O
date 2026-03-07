@@ -171,8 +171,38 @@ async function startServer() {
       const userDoc = await db.collection("users").doc(uid).get();
       
       if (!userDoc.exists) {
-        console.log("User record not found in Firestore for UID:", uid);
-        return res.status(404).json({ error: "User record not found in database. Please sign up again." });
+        console.log("User record missing in Firestore, creating one for UID:", uid);
+        const adminEmails = ['yourmeherun007@gmail.com', 'rafiyajannat404@gmail.com', 'yoursmeherun007@gmail.com'];
+        const email = decodedToken.email || "";
+        const isAdmin = adminEmails.includes(email.toLowerCase());
+        
+        const newUserData = {
+          id: uid,
+          username: email.split('@')[0] || "user_" + uid.substring(0, 5),
+          email: email.toLowerCase(),
+          ff_id: 'N/A',
+          first_name: isAdmin ? 'Admin' : 'User',
+          last_name: '',
+          balance: 0,
+          is_admin: isAdmin ? 1 : 0,
+          created_at: admin.firestore.FieldValue.serverTimestamp()
+        };
+        
+        await db.collection("users").doc(uid).set(newUserData);
+        const updatedDoc = await db.collection("users").doc(uid).get();
+        const user = updatedDoc.data();
+        
+        return res.json({ 
+          token: idToken,
+          user: { 
+            id: uid, 
+            username: user?.username, 
+            email: user?.email, 
+            ff_id: user?.ff_id, 
+            balance: user?.balance, 
+            is_admin: user?.is_admin 
+          } 
+        });
       }
 
       const user = userDoc.data();
@@ -548,6 +578,70 @@ async function startServer() {
         created_at: admin.firestore.FieldValue.serverTimestamp()
       });
       res.json({ message: "Notice posted" });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/admin/initialize", authenticateToken, isAdmin, checkFirebase, async (req, res) => {
+    try {
+      if (!db) throw new Error("Database not initialized");
+      
+      // Create a sample tournament
+      const tournament = {
+        title: "Grand Opening Tournament",
+        description: "Welcome to our new platform! Join this tournament to win big.",
+        type: "Classic",
+        mode: "Solo",
+        entry_fee: 50,
+        prize_pool: 1000,
+        start_date: new Date(Date.now() + 86400000).toISOString(),
+        slots_total: 48,
+        slots_filled: 0,
+        image: "https://picsum.photos/seed/gaming/800/400",
+        created_at: admin.firestore.FieldValue.serverTimestamp()
+      };
+      
+      await db.collection("tournaments").add(tournament);
+      
+      // Create default settings
+      await db.collection("settings").doc("general").set({
+        logo_url: "https://picsum.photos/seed/logo/200/200",
+        updated_at: admin.firestore.FieldValue.serverTimestamp()
+      });
+      
+      res.json({ message: "App initialized successfully" });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/admin/cleanup", authenticateToken, isAdmin, checkFirebase, async (req, res) => {
+    try {
+      if (!db) throw new Error("Database not initialized");
+      
+      const collections = ['tournaments', 'registrations', 'transactions', 'notices'];
+      const adminEmails = ['yourmeherun007@gmail.com', 'rafiyajannat404@gmail.com', 'yoursmeherun007@gmail.com'];
+      
+      for (const coll of collections) {
+        const snapshot = await db.collection(coll).get();
+        const batch = db.batch();
+        snapshot.docs.forEach(doc => batch.delete(doc.ref));
+        await batch.commit();
+      }
+      
+      // Delete non-admin users
+      const usersSnapshot = await db.collection("users").get();
+      const userBatch = db.batch();
+      usersSnapshot.docs.forEach(doc => {
+        const userData = doc.data();
+        if (!adminEmails.includes(userData.email)) {
+          userBatch.delete(doc.ref);
+        }
+      });
+      await userBatch.commit();
+      
+      res.json({ message: "Database cleaned successfully. All non-admin data removed." });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }

@@ -1545,6 +1545,44 @@ const AdminPanel = ({ user, logoUrl, onLogoUpdate }: { user: User, logoUrl: stri
     }
   };
 
+  const handleCleanup = async () => {
+    if (!window.confirm("Are you sure you want to delete ALL data (tournaments, transactions, non-admin users)? This cannot be undone.")) return;
+    setLoading(true);
+    const token = localStorage.getItem('ff_token');
+    try {
+      const res = await fetch('/api/admin/cleanup', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (!res.ok) throw new Error('Cleanup failed');
+      alert('Database cleaned successfully!');
+      window.location.reload();
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleInitialize = async () => {
+    setLoading(true);
+    const token = localStorage.getItem('ff_token');
+    try {
+      // Create a default tournament and settings via backend
+      const res = await fetch('/api/admin/initialize', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (!res.ok) throw new Error('Initialization failed');
+      alert('App initialized successfully! You can now see a sample tournament.');
+      window.location.reload();
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleUpdateSettings = async () => {
     setLoading(true);
     const token = localStorage.getItem('ff_token');
@@ -1903,6 +1941,30 @@ const AdminPanel = ({ user, logoUrl, onLogoUpdate }: { user: User, logoUrl: stri
                     <div className="w-20 h-20 rounded-full overflow-hidden bg-orange-600 flex items-center justify-center">
                       <img src={newLogoUrl} alt="Preview" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                     </div>
+                  </div>
+
+                  <div className="pt-8 border-t border-white/5">
+                    <h3 className="text-lg font-bold mb-2 text-emerald-500">First Time Setup</h3>
+                    <p className="text-sm text-white/40 mb-4">Click this to create sample data if your app is empty.</p>
+                    <button 
+                      onClick={handleInitialize} 
+                      disabled={loading}
+                      className="btn-primary bg-emerald-600 hover:bg-emerald-500 w-full max-w-xs"
+                    >
+                      {loading ? 'Initializing...' : 'Initialize App Data'}
+                    </button>
+                  </div>
+
+                  <div className="pt-8 border-t border-red-500/20">
+                    <h3 className="text-lg font-bold mb-2 text-red-500">Danger Zone</h3>
+                    <p className="text-sm text-white/40 mb-4">Wipe all tournaments, registrations, transactions, and non-admin users. This action is irreversible.</p>
+                    <button 
+                      onClick={handleCleanup} 
+                      disabled={loading}
+                      className="btn-primary bg-red-600 hover:bg-red-500 w-full max-w-xs"
+                    >
+                      {loading ? 'Cleaning...' : 'Wipe All Data'}
+                    </button>
                   </div>
                 </div>
               </div>

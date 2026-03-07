@@ -311,11 +311,29 @@ const AuthModal = ({ isOpen, onClose, mode, setMode, onAuthSuccess, lang, showAd
         const uid = userCredential.user.uid;
         const idToken = await userCredential.user.getIdToken();
         
-        // Step 2: Fetch User Data directly from Firestore (Bypassing backend for initial login)
-        const userDoc = await getDoc(doc(db, "users", uid));
+        // Step 2: Fetch User Data directly from Firestore
+        let userDoc = await getDoc(doc(db, "users", uid));
         
+        // AUTO-REPAIR: If user exists in Auth but not in Firestore, create the record
         if (!userDoc.exists()) {
-          throw new Error("User record not found in database. Please sign up again.");
+          console.log("User record missing in Firestore, creating one for UID:", uid);
+          const adminEmails = ['yourmeherun007@gmail.com', 'rafiyajannat404@gmail.com', 'yoursmeherun007@gmail.com'];
+          const isAdmin = adminEmails.includes(formData.email.toLowerCase());
+          
+          const newUserData = {
+            id: uid,
+            username: formData.email.split('@')[0],
+            email: formData.email.toLowerCase(),
+            ff_id: 'N/A',
+            first_name: isAdmin ? 'Admin' : 'User',
+            last_name: '',
+            balance: 0,
+            is_admin: isAdmin ? 1 : 0,
+            created_at: serverTimestamp()
+          };
+          
+          await setDoc(doc(db, "users", uid), newUserData);
+          userDoc = await getDoc(doc(db, "users", uid));
         }
 
         const userData = userDoc.data() as any;

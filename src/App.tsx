@@ -4,7 +4,8 @@ import {
   createUserWithEmailAndPassword, 
   signOut,
   onAuthStateChanged,
-  sendEmailVerification
+  sendEmailVerification,
+  signInWithCustomToken
 } from "firebase/auth";
 import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 import React, { useState, useEffect, useRef } from 'react';
@@ -16,7 +17,7 @@ import {
   Wallet, User as UserIcon, Home, Bell, Copy, Check, 
   ArrowUpRight, ArrowDownLeft, Plus, Send, AlertCircle,
   Settings, MessageSquare, Clock, Eye, EyeOff, Languages, Mail,
-  Youtube, Facebook, Instagram
+  Youtube, Facebook, Instagram, Camera
 } from 'lucide-react';
 import { translations, type Language } from './translations';
 import { clsx, type ClassValue } from 'clsx';
@@ -158,14 +159,15 @@ const FloatingContact = () => {
 
 // --- Components ---
 
-const Navbar = ({ user, onLogout, openAuth, noticesCount, lang, setLang, logoUrl }: { 
+const Navbar = ({ user, onLogout, openAuth, noticesCount, lang, setLang, logoUrl, settings }: { 
   user: User | null, 
   onLogout: () => void, 
   openAuth: (mode: 'login' | 'signup') => void, 
   noticesCount: number,
   lang: Language,
   setLang: (l: Language) => void,
-  logoUrl: string
+  logoUrl: string,
+  settings: any
 }) => {
   const [isScrolled, setIsScrolled] = useState(false);
   const location = useLocation();
@@ -198,7 +200,7 @@ const Navbar = ({ user, onLogout, openAuth, noticesCount, lang, setLang, logoUrl
             <Target className="w-6 h-6 text-white absolute" style={{ zIndex: -1 }} />
           </div>
           <div className="flex flex-col">
-            <span className="text-xl font-display font-bold tracking-tighter leading-none">YOUR MEHERUN GAMING</span>
+            <span className="text-xl font-display font-bold tracking-tighter leading-none">{settings?.site_name || 'yoursmeherungaming'}</span>
             <span className="text-[10px] text-white/40 font-bold tracking-widest uppercase">Elite Free Fire Community</span>
           </div>
         </Link>
@@ -298,6 +300,58 @@ const AuthModal = ({ isOpen, onClose, mode, setMode, onAuthSuccess, lang, showAd
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [authStep, setAuthStep] = useState<'initial' | 'otp'>('initial');
+  const [otp, setOtp] = useState('');
+
+  const handleSendOTP = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+
+    try {
+      const response = await fetch('/api/auth/otp/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: formData.email }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Failed to send OTP');
+      
+      setAuthStep('otp');
+      if (data.dev_otp) {
+        setError(`[DEV MODE] OTP: ${data.dev_otp}`);
+      }
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleVerifyOTP = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+
+    try {
+      const response = await fetch('/api/auth/otp/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: formData.email, otp }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Invalid OTP');
+
+      // Sign in with Custom Token
+      const userCredential = await signInWithCustomToken(auth, data.token);
+      onAuthSuccess(data.token, data.user);
+      onClose();
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -460,92 +514,115 @@ const AuthModal = ({ isOpen, onClose, mode, setMode, onAuthSuccess, lang, showAd
         </div>
 
         <h2 className="text-3xl font-display font-bold mb-2 text-center">
-          {showAdminLogin ? 'Admin Panel Login' : (mode === 'login' ? translations[lang].nav.login : 'Create Account')}
+          {showAdminLogin ? 'Admin Panel Login' : (authStep === 'otp' ? 'Verify OTP' : (mode === 'login' ? translations[lang].nav.login : 'Create Account'))}
         </h2>
         <p className="text-white/60 mb-8 text-center">
-          {showAdminLogin ? 'Enter your admin credentials to access the control center' : (mode === 'login' ? 'Sign in to access your tournaments' : 'Join the elite Free Fire community')}
+          {showAdminLogin ? 'Enter your admin credentials to access the control center' : (authStep === 'otp' ? `Enter the 6-digit code sent to ${formData.email}` : (mode === 'login' ? 'Sign in to access your tournaments' : 'Join the elite Free Fire community'))}
         </p>
 
         {error && (
-          <div className={`p-3 rounded-lg mb-6 text-sm flex items-center gap-2 ${error.includes('sent') || error.includes('created') ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-red-500/10 text-red-500 border border-red-500/20'}`}>
+          <div className={`p-3 rounded-lg mb-6 text-sm flex items-center gap-2 ${error.includes('sent') || error.includes('created') || error.includes('OTP:') ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-red-500/10 text-red-500 border border-red-500/20'}`}>
             <AlertCircle className="w-4 h-4" />
             {error}
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {mode === 'signup' && (
-            <>
-              <div className="grid grid-cols-2 gap-4">
-                <input
-                  type="text"
-                  placeholder={translations[lang].profile.first_name}
-                  className="input-field"
-                  required
-                  value={formData.first_name}
-                  onChange={(e) => setFormData({ ...formData, first_name: e.target.value })}
-                />
-                <input
-                  type="text"
-                  placeholder={translations[lang].profile.last_name}
-                  className="input-field"
-                  required
-                  value={formData.last_name}
-                  onChange={(e) => setFormData({ ...formData, last_name: e.target.value })}
-                />
-              </div>
-              <input
-                type="text"
-                placeholder={translations[lang].profile.username}
-                className="input-field"
-                required
-                value={formData.username}
-                onChange={(e) => setFormData({ ...formData, username: e.target.value })}
-              />
-              <input
-                type="text"
-                placeholder={translations[lang].profile.ff_id}
-                className="input-field"
-                required
-                value={formData.ff_id}
-                onChange={(e) => setFormData({ ...formData, ff_id: e.target.value })}
-              />
-            </>
-          )}
-          <input
-            type="email"
-            placeholder="Email Address"
-            className="input-field"
-            required
-            value={formData.email}
-            onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-          />
-          <div className="relative">
+        {authStep === 'otp' ? (
+          <form onSubmit={handleVerifyOTP} className="space-y-4">
             <input
-              type={showPassword ? "text" : "password"}
-              placeholder="Password"
-              className="input-field pr-12"
+              type="text"
+              placeholder="6-Digit OTP"
+              className="input-field text-center text-2xl tracking-[1em] font-bold"
               required
-              value={formData.password}
-              onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+              maxLength={6}
+              value={otp}
+              onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))}
             />
+            <button type="submit" disabled={loading} className="btn-primary w-full mt-4">
+              {loading ? 'Verifying...' : 'Verify & Login'}
+            </button>
             <button 
               type="button"
-              onClick={() => setShowPassword(!showPassword)}
-              className="absolute right-4 top-1/2 -translate-y-1/2 text-white/40 hover:text-white transition-colors"
+              onClick={() => setAuthStep('initial')}
+              className="w-full text-white/40 hover:text-white text-sm font-bold"
             >
-              {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+              Back to Email
             </button>
-          </div>
-          {mode === 'signup' && (
+          </form>
+        ) : (
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {mode === 'signup' && (
+              <>
+                <div className="grid grid-cols-2 gap-4">
+                  <input
+                    type="text"
+                    placeholder={translations[lang].profile.first_name}
+                    className="input-field"
+                    required
+                    value={formData.first_name}
+                    onChange={(e) => setFormData({ ...formData, first_name: e.target.value })}
+                  />
+                  <input
+                    type="text"
+                    placeholder={translations[lang].profile.last_name}
+                    className="input-field"
+                    required
+                    value={formData.last_name}
+                    onChange={(e) => setFormData({ ...formData, last_name: e.target.value })}
+                  />
+                </div>
+                <input
+                  type="text"
+                  placeholder={translations[lang].profile.username}
+                  className="input-field"
+                  required
+                  value={formData.username}
+                  onChange={(e) => setFormData({ ...formData, username: e.target.value })}
+                />
+                <input
+                  type="text"
+                  placeholder={translations[lang].profile.ff_id}
+                  className="input-field"
+                  required
+                  value={formData.ff_id}
+                  onChange={(e) => setFormData({ ...formData, ff_id: e.target.value })}
+                />
+              </>
+            )}
+            <input
+              type="email"
+              placeholder="Email Address"
+              className="input-field"
+              required
+              value={formData.email}
+              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+            />
+            
+            {!showAdminLogin && mode === 'login' ? (
+              <div className="space-y-4">
+                <button 
+                  type="button" 
+                  onClick={handleSendOTP}
+                  disabled={loading || !formData.email}
+                  className="btn-primary w-full bg-orange-600/20 border-orange-500/30 text-orange-500 hover:bg-orange-600/30"
+                >
+                  {loading ? 'Sending...' : 'Login with OTP (Email Code)'}
+                </button>
+                <div className="relative flex items-center justify-center">
+                  <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-white/10"></div></div>
+                  <span className="relative px-4 bg-[#1a1a1a] text-[10px] font-bold text-white/20 uppercase tracking-widest">or use password</span>
+                </div>
+              </div>
+            ) : null}
+
             <div className="relative">
               <input
                 type={showPassword ? "text" : "password"}
-                placeholder="Confirm Password"
+                placeholder="Password"
                 className="input-field pr-12"
                 required
-                value={formData.confirm_password}
-                onChange={(e) => setFormData({ ...formData, confirm_password: e.target.value })}
+                value={formData.password}
+                onChange={(e) => setFormData({ ...formData, password: e.target.value })}
               />
               <button 
                 type="button"
@@ -555,12 +632,31 @@ const AuthModal = ({ isOpen, onClose, mode, setMode, onAuthSuccess, lang, showAd
                 {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
               </button>
             </div>
-          )}
+            {mode === 'signup' && (
+              <div className="relative">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  placeholder="Confirm Password"
+                  className="input-field pr-12"
+                  required
+                  value={formData.confirm_password}
+                  onChange={(e) => setFormData({ ...formData, confirm_password: e.target.value })}
+                />
+                <button 
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-white/40 hover:text-white transition-colors"
+                >
+                  {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                </button>
+              </div>
+            )}
 
-          <button type="submit" disabled={loading} className="btn-primary w-full mt-4">
-            {loading ? 'Processing...' : (showAdminLogin ? 'Log in to the admin panel' : (mode === 'login' ? translations[lang].nav.login : 'Sign Up'))}
-          </button>
-        </form>
+            <button type="submit" disabled={loading} className="btn-primary w-full mt-4">
+              {loading ? 'Processing...' : (showAdminLogin ? 'Log in to the admin panel' : (mode === 'login' ? translations[lang].nav.login : 'Sign Up'))}
+            </button>
+          </form>
+        )}
 
         <div className="mt-6 text-center">
           <p className="text-white/60 text-sm">
@@ -664,7 +760,7 @@ const TournamentCard: React.FC<{ tournament: Tournament, onRegister: (id: number
 
 // --- Pages ---
 
-const LandingPage = ({ user, openAuth, lang }: { user: User | null, openAuth: (mode: 'login' | 'signup') => void, lang: Language }) => {
+const LandingPage = ({ user, openAuth, lang, settings }: { user: User | null, openAuth: (mode: 'login' | 'signup') => void, lang: Language, settings: any }) => {
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
   const [notices, setNotices] = useState<Notice[]>([]);
   const t = translations[lang].hero;
@@ -707,11 +803,17 @@ const LandingPage = ({ user, openAuth, lang }: { user: User | null, openAuth: (m
             transition={{ duration: 0.6 }}
           >
             <h1 className="text-6xl md:text-8xl font-display font-black tracking-tighter mb-6 leading-none">
-              {t.title_part1} <br />
-              <span className="text-transparent bg-clip-text bg-gradient-to-r from-orange-600 to-yellow-500">{t.title_part2}</span>
+              {settings?.hero_title ? (
+                settings.hero_title
+              ) : (
+                <>
+                  {t.title_part1} <br />
+                  <span className="text-transparent bg-clip-text bg-gradient-to-r from-orange-600 to-yellow-500">{t.title_part2}</span>
+                </>
+              )}
             </h1>
             <p className="text-xl text-white/60 max-w-2xl mx-auto mb-10">
-              {t.subtitle}
+              {settings?.hero_subtitle || t.subtitle}
             </p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
               {user ? (
@@ -1250,6 +1352,21 @@ const ProfilePage = ({ user, onLogout, refreshUser, lang }: { user: User, onLogo
     }
   }, [clickCount, user.is_admin, navigate]);
 
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, callback: (base64: string) => void) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 1024 * 1024) { // 1MB limit
+        alert("File is too large! Please select an image under 1MB.");
+        return;
+      }
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        callback(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
   const handleUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
     setMessage('');
@@ -1340,7 +1457,29 @@ const ProfilePage = ({ user, onLogout, refreshUser, lang }: { user: User, onLogo
               className="glass-card p-8 mt-8"
             >
               <h2 className="text-xl font-display font-bold mb-6">{t.edit}</h2>
-              <form onSubmit={handleUpdate} className="space-y-4">
+              <form onSubmit={handleUpdate} className="space-y-6">
+                <div className="flex flex-col items-center gap-4 mb-6">
+                  <div className="relative group">
+                    <div className="w-24 h-24 rounded-full overflow-hidden border-2 border-orange-500/50 bg-white/5 flex items-center justify-center">
+                      {formData.profile_picture ? (
+                        <img src={formData.profile_picture} alt="Preview" className="w-full h-full object-cover" />
+                      ) : (
+                        <UserIcon className="w-12 h-12 text-white/20" />
+                      )}
+                    </div>
+                    <label className="absolute inset-0 flex items-center justify-center bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer rounded-full">
+                      <Camera className="w-6 h-6 text-white" />
+                      <input 
+                        type="file" 
+                        accept="image/*" 
+                        className="hidden" 
+                        onChange={(e) => handleFileUpload(e, (base64) => setFormData({...formData, profile_picture: base64}))} 
+                      />
+                    </label>
+                  </div>
+                  <p className="text-xs text-white/40">Click to upload from gallery</p>
+                </div>
+
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm text-white/40 mb-2">{t.first_name}</label>
@@ -1434,19 +1573,56 @@ const NoticePage = () => {
   );
 };
 
-const AdminPanel = ({ user, logoUrl, onLogoUpdate }: { user: User, logoUrl: string, onLogoUpdate: (url: string) => void }) => {
+const AdminPanel = ({ user, logoUrl, onLogoUpdate, onSettingsUpdate }: { user: User, logoUrl: string, onLogoUpdate: (url: string) => void, onSettingsUpdate: () => void }) => {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [users, setUsers] = useState<any[]>([]);
   const [notice, setNotice] = useState('');
   const [loading, setLoading] = useState(false);
+  const [noticeLoading, setNoticeLoading] = useState(false);
+  const [matchLoading, setMatchLoading] = useState(false);
   const [balanceUpdate, setBalanceUpdate] = useState<{userId: number, amount: string}>({userId: 0, amount: ''});
   const [stats, setStats] = useState({ users: 0, tournaments: 0, pending: 0 });
   const [activeTab, setActiveTab] = useState<'requests' | 'users' | 'notice' | 'post_match' | 'overview' | 'settings'>('overview');
   const [newLogoUrl, setNewLogoUrl] = useState(logoUrl);
+  const [newSiteName, setNewSiteName] = useState('');
+  const [newHeroTitle, setNewHeroTitle] = useState('');
+  const [newHeroSubtitle, setNewHeroSubtitle] = useState('');
+  const [matchImage, setMatchImage] = useState('');
+  const [firebaseStatus, setFirebaseStatus] = useState<{status: string, message: string} | null>(null);
 
   useEffect(() => {
     setNewLogoUrl(logoUrl);
+    // We'll set these when settings are fetched or use defaults
+    checkFirebaseStatus();
   }, [logoUrl]);
+
+  // Fetch current settings to populate form
+  useEffect(() => {
+    const fetchSettings = async () => {
+      try {
+        const res = await fetch('/api/settings');
+        const data = await res.json();
+        if (data) {
+          setNewSiteName(data.site_name || 'yoursmeherungaming');
+          setNewHeroTitle(data.hero_title || '');
+          setNewHeroSubtitle(data.hero_subtitle || '');
+        }
+      } catch (err) {
+        console.error('Failed to fetch settings:', err);
+      }
+    };
+    if (activeTab === 'settings') fetchSettings();
+  }, [activeTab]);
+
+  const checkFirebaseStatus = async () => {
+    try {
+      const res = await fetch('/api/firebase-check');
+      const data = await res.json();
+      setFirebaseStatus(data);
+    } catch (err) {
+      setFirebaseStatus({ status: 'error', message: 'Failed to reach health check endpoint' });
+    }
+  };
 
   useEffect(() => {
     const adminEmails = ['yourmeherun007@gmail.com', 'rafiyajannat404@gmail.com', 'yoursmeherun007@gmail.com'];
@@ -1494,7 +1670,7 @@ const AdminPanel = ({ user, logoUrl, onLogoUpdate }: { user: User, logoUrl: stri
 
   const handlePostNotice = async () => {
     if (!notice) return;
-    setLoading(true);
+    setNoticeLoading(true);
     const token = localStorage.getItem('ff_token');
     try {
       const res = await fetch('/api/admin/notices', {
@@ -1510,14 +1686,15 @@ const AdminPanel = ({ user, logoUrl, onLogoUpdate }: { user: User, logoUrl: stri
       
       if (res.ok) {
         setNotice('');
-        alert('Notice posted!');
+        alert('Notice posted successfully!');
+        // Refresh notices if needed
       } else {
         alert('Error: ' + (data.error || 'Failed to post notice'));
       }
     } catch (err: any) {
       alert('Failed to post notice: ' + err.message);
     } finally {
-      setLoading(false);
+      setNoticeLoading(false);
     }
   };
 
@@ -1573,7 +1750,8 @@ const AdminPanel = ({ user, logoUrl, onLogoUpdate }: { user: User, logoUrl: stri
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` }
       });
-      if (!res.ok) throw new Error('Initialization failed');
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Initialization failed');
       alert('App initialized successfully! You can now see a sample tournament.');
       window.location.reload();
     } catch (err: any) {
@@ -1593,11 +1771,18 @@ const AdminPanel = ({ user, logoUrl, onLogoUpdate }: { user: User, logoUrl: stri
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify({ logo_url: newLogoUrl })
+        body: JSON.stringify({ 
+          logo_url: newLogoUrl,
+          site_name: newSiteName,
+          hero_title: newHeroTitle,
+          hero_subtitle: newHeroSubtitle
+        })
       });
-      if (!res.ok) throw new Error('Failed to update settings');
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to update settings');
       alert('Settings updated successfully!');
       onLogoUpdate(newLogoUrl);
+      onSettingsUpdate();
     } catch (err: any) {
       alert(err.message);
     } finally {
@@ -1611,7 +1796,18 @@ const AdminPanel = ({ user, logoUrl, onLogoUpdate }: { user: User, logoUrl: stri
   return (
     <div className="pt-32 pb-32 px-6">
       <div className="max-w-7xl mx-auto">
-        <h1 className="text-4xl font-display font-bold mb-12">Admin Control Center</h1>
+        <div className="flex justify-between items-center mb-12">
+          <h1 className="text-4xl font-display font-bold">Admin Control Center</h1>
+          {firebaseStatus && (
+            <div className={cn(
+              "flex items-center gap-2 px-4 py-2 rounded-full text-xs font-bold border",
+              firebaseStatus.status === 'ok' ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/20" : "bg-red-500/10 text-red-500 border-red-500/20"
+            )}>
+              <div className={cn("w-2 h-2 rounded-full", firebaseStatus.status === 'ok' ? "bg-emerald-500 animate-pulse" : "bg-red-500")} />
+              Firebase: {firebaseStatus.status === 'ok' ? 'Connected' : 'Error'}
+            </div>
+          )}
+        </div>
 
         <div className="flex gap-4 mb-8 overflow-x-auto pb-2">
           <button 
@@ -1701,19 +1897,19 @@ const AdminPanel = ({ user, logoUrl, onLogoUpdate }: { user: User, logoUrl: stri
                 <h2 className="text-2xl font-display font-bold mb-6">Create New Match</h2>
                 <form onSubmit={async (e) => {
                   e.preventDefault();
-                  setLoading(true);
+                  setMatchLoading(true);
                   const target = e.target as any;
-                  const formData = {
-                    title: target.title.value,
-                    description: target.description.value,
-                    type: target.type.value,
-                    mode: target.mode.value,
-                    entry_fee: parseInt(target.entry_fee.value),
-                    prize_pool: parseInt(target.prize_pool.value),
-                    start_date: target.start_date.value,
-                    slots_total: parseInt(target.slots_total.value),
-                    image: target.image.value || 'https://picsum.photos/seed/gaming/800/400'
-                  };
+                    const formData = {
+                      title: target.title.value,
+                      description: target.description.value,
+                      type: target.type.value,
+                      mode: target.mode.value,
+                      entry_fee: parseInt(target.entry_fee.value),
+                      prize_pool: parseInt(target.prize_pool.value),
+                      start_date: target.start_date.value,
+                      slots_total: parseInt(target.slots_total.value),
+                      image: matchImage || 'https://picsum.photos/seed/gaming/800/400'
+                    };
                   
                   const token = localStorage.getItem('ff_token');
                   try {
@@ -1731,6 +1927,7 @@ const AdminPanel = ({ user, logoUrl, onLogoUpdate }: { user: User, logoUrl: stri
                     if (res.ok) {
                       alert('Match posted successfully!');
                       target.reset();
+                      setMatchImage('');
                       fetchStats();
                     } else {
                       alert('Error: ' + (data.error || 'Failed to post match'));
@@ -1739,7 +1936,7 @@ const AdminPanel = ({ user, logoUrl, onLogoUpdate }: { user: User, logoUrl: stri
                     console.error('Post match error:', err);
                     alert('Failed to post match: ' + err.message);
                   } finally {
-                    setLoading(false);
+                    setMatchLoading(false);
                   }
                 }} className="space-y-4">
                   <div className="grid grid-cols-2 gap-4">
@@ -1784,12 +1981,35 @@ const AdminPanel = ({ user, logoUrl, onLogoUpdate }: { user: User, logoUrl: stri
                       <input name="start_date" type="datetime-local" required className="input-field" />
                     </div>
                     <div className="col-span-2">
-                      <label className="block text-sm text-white/40 mb-2">Image URL (Optional)</label>
-                      <input name="image" className="input-field" placeholder="https://..." />
+                      <label className="block text-sm text-white/40 mb-2">Match Banner Image</label>
+                      <div className="flex flex-col gap-4">
+                        {matchImage && (
+                          <div className="w-full h-40 rounded-xl overflow-hidden border border-white/10 bg-black/40 flex items-center justify-center">
+                            <img src={matchImage} alt="Preview" className="w-full h-full object-cover" />
+                          </div>
+                        )}
+                        <label className="btn-secondary cursor-pointer flex items-center justify-center gap-2 py-4 hover:bg-white/20 transition-colors">
+                          <Camera className="w-5 h-5" />
+                          {matchImage ? 'Change Image' : 'Upload from Gallery'}
+                          <input 
+                            type="file" 
+                            accept="image/*" 
+                            className="hidden" 
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                const reader = new FileReader();
+                                reader.onloadend = () => setMatchImage(reader.result as string);
+                                reader.readAsDataURL(file);
+                              }
+                            }} 
+                          />
+                        </label>
+                      </div>
                     </div>
                   </div>
-                  <button type="submit" disabled={loading} className="btn-primary w-full py-4 text-lg font-bold">
-                    {loading ? 'Posting...' : 'Post Match to Website'}
+                  <button type="submit" disabled={matchLoading} className="btn-primary w-full py-4 text-lg font-bold">
+                    {matchLoading ? 'Posting...' : 'Post Match to Website'}
                   </button>
                 </form>
               </div>
@@ -1903,10 +2123,10 @@ const AdminPanel = ({ user, logoUrl, onLogoUpdate }: { user: User, logoUrl: stri
                 />
                 <button 
                   onClick={handlePostNotice}
-                  disabled={loading}
+                  disabled={noticeLoading}
                   className="btn-primary w-full flex items-center justify-center gap-2"
                 >
-                  <Send className="w-4 h-4" /> {loading ? 'Posting...' : 'Post Notice'}
+                  <Send className="w-4 h-4" /> {noticeLoading ? 'Posting...' : 'Post Notice'}
                 </button>
               </div>
             )}
@@ -1915,29 +2135,66 @@ const AdminPanel = ({ user, logoUrl, onLogoUpdate }: { user: User, logoUrl: stri
               <div className="glass-card p-8">
                 <h3 className="text-xl font-bold mb-6">General Settings</h3>
                 <div className="space-y-6">
-                  <div>
-                    <label className="block text-sm text-white/40 font-bold uppercase mb-2">Logo URL</label>
-                    <div className="flex gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                      <label className="block text-sm text-white/40 font-bold uppercase mb-2">Site Name</label>
                       <input 
                         type="text" 
-                        className="input-field flex-1" 
+                        className="input-field" 
+                        value={newSiteName}
+                        onChange={(e) => setNewSiteName(e.target.value)}
+                        placeholder="e.g. yoursmeherungaming"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm text-white/40 font-bold uppercase mb-2">Logo URL</label>
+                      <input 
+                        type="text" 
+                        className="input-field" 
                         value={newLogoUrl}
                         onChange={(e) => setNewLogoUrl(e.target.value)}
                         placeholder="https://example.com/logo.png"
                       />
-                      <button 
-                        onClick={handleUpdateSettings}
-                        disabled={loading}
-                        className="btn-primary px-8"
-                      >
-                        {loading ? 'Saving...' : 'Save'}
-                      </button>
                     </div>
-                    <p className="mt-2 text-xs text-white/40 italic">Enter the direct URL of your logo image. It will be displayed in the Navbar and browser tab.</p>
+                  </div>
+
+                  <div className="pt-6 border-t border-white/5">
+                    <h3 className="text-lg font-bold mb-4">Hero Section Content</h3>
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm text-white/40 font-bold uppercase mb-2">Hero Title</label>
+                        <input 
+                          type="text" 
+                          className="input-field" 
+                          value={newHeroTitle}
+                          onChange={(e) => setNewHeroTitle(e.target.value)}
+                          placeholder="e.g. Dominate the Arena"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm text-white/40 font-bold uppercase mb-2">Hero Subtitle</label>
+                        <textarea 
+                          className="input-field min-h-[100px]" 
+                          value={newHeroSubtitle}
+                          onChange={(e) => setNewHeroSubtitle(e.target.value)}
+                          placeholder="e.g. Join elite Free Fire tournaments and win real prizes."
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="pt-6 border-t border-white/5 flex justify-end">
+                    <button 
+                      onClick={handleUpdateSettings}
+                      disabled={loading}
+                      className="btn-primary px-12"
+                    >
+                      {loading ? 'Saving...' : 'Save All Settings'}
+                    </button>
                   </div>
                   
                   <div className="pt-6 border-t border-white/5">
-                    <label className="block text-sm text-white/40 font-bold uppercase mb-4">Preview</label>
+                    <label className="block text-sm text-white/40 font-bold uppercase mb-4">Logo Preview</label>
                     <div className="w-20 h-20 rounded-full overflow-hidden bg-orange-600 flex items-center justify-center">
                       <img src={newLogoUrl} alt="Preview" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                     </div>
@@ -2216,6 +2473,7 @@ const TournamentsPage = ({ user, openAuth, lang }: { user: User | null, openAuth
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
+  const [settings, setSettings] = useState<any>(null);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [authModal, setAuthModal] = useState<{ isOpen: boolean, mode: 'login' | 'signup' }>({ isOpen: false, mode: 'login' });
   const [noticesCount, setNoticesCount] = useState(0);
@@ -2225,12 +2483,19 @@ export default function App() {
   const [redirectPath, setRedirectPath] = useState<string | null>(null);
   const [logoUrl, setLogoUrl] = useState('https://picsum.photos/seed/gaming-logo/200/200');
 
+  const fetchSettings = async () => {
+    try {
+      const res = await fetch('/api/settings');
+      const data = await res.json();
+      setSettings(data);
+      if (data.logo_url) setLogoUrl(data.logo_url);
+    } catch (err) {
+      console.error('Failed to fetch settings:', err);
+    }
+  };
+
   useEffect(() => {
-    fetch('/api/settings')
-      .then(res => res.json())
-      .then(data => {
-        if (data.logo_url) setLogoUrl(data.logo_url);
-      });
+    fetchSettings();
   }, []);
 
   useEffect(() => {
@@ -2365,15 +2630,16 @@ export default function App() {
           lang={lang}
           setLang={setLang}
           logoUrl={logoUrl}
+          settings={settings}
         />
 
         <Routes>
-          <Route path="/" element={<LandingPage user={user} openAuth={(mode) => setAuthModal({ isOpen: true, mode })} lang={lang} />} />
+          <Route path="/" element={<LandingPage user={user} openAuth={(mode) => setAuthModal({ isOpen: true, mode })} lang={lang} settings={settings} />} />
           <Route path="/tournaments" element={<TournamentsPage user={user} openAuth={(mode) => setAuthModal({ isOpen: true, mode })} lang={lang} />} />
           <Route path="/wallet" element={isInitialLoad ? null : (user ? <WalletPage user={user} refreshUser={refreshUser} lang={lang} /> : <Navigate to="/" />)} />
           <Route path="/profile" element={isInitialLoad ? null : (user ? <ProfilePage user={user} onLogout={handleLogout} refreshUser={refreshUser} lang={lang} /> : <Navigate to="/" />)} />
           <Route path="/notices" element={<NoticePage />} />
-          <Route path="/admin" element={isInitialLoad ? <div className="pt-32 text-center text-white/40">Loading...</div> : (user ? <AdminPanel user={user} logoUrl={logoUrl} onLogoUpdate={setLogoUrl} /> : <Navigate to="/" />)} />
+          <Route path="/admin" element={isInitialLoad ? <div className="pt-32 text-center text-white/40">Loading...</div> : (user ? <AdminPanel user={user} logoUrl={logoUrl} onLogoUpdate={setLogoUrl} onSettingsUpdate={fetchSettings} /> : <Navigate to="/" />)} />
           <Route path="/dashboard" element={isInitialLoad ? null : (user ? <Dashboard user={user} /> : <Navigate to="/" />)} />
           <Route path="/leaderboard" element={<div className="pt-32 text-center text-white/40">Leaderboard coming soon...</div>} />
         </Routes>
@@ -2402,8 +2668,8 @@ export default function App() {
             <div className="flex items-center gap-2">
               <Target className="w-6 h-6 text-orange-600" />
               <div className="flex flex-col">
-                <span className="text-xl font-display font-bold tracking-tighter leading-none">YOUR MEHERUN GAMING</span>
-                <span className="text-[10px] text-white/40 font-bold tracking-widest uppercase">YOUR MEHERUN GAMING</span>
+                <span className="text-xl font-display font-bold tracking-tighter leading-none">{settings?.site_name || 'yoursmeherungaming'}</span>
+                <span className="text-[10px] text-white/40 font-bold tracking-widest uppercase">{settings?.site_name || 'yoursmeherungaming'}</span>
               </div>
             </div>
             <div className="flex gap-8 text-sm text-white/40">
@@ -2421,7 +2687,7 @@ export default function App() {
                 }
               }}
             >
-              <span>© 2026 YOUR MEHERUN GAMING. All rights reserved.</span>
+              <span>© 2026 {settings?.site_name || 'yoursmeherungaming'}. All rights reserved.</span>
               {showAdminLogin && (
                 <button 
                   onClick={(e) => {

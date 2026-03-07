@@ -4,8 +4,9 @@ import path from "path";
 import { fileURLToPath } from "url";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import dotenv from "dotenv";
+import nodemailer from "nodemailer";
 import admin from "firebase-admin";
+import dotenv from "dotenv";
 
 dotenv.config();
 
@@ -43,11 +44,12 @@ if (projectId && clientEmail && privateKey) {
 
 const JWT_SECRET = process.env.JWT_SECRET || "ff-arena-secret-key-123";
 
+const app = express();
+
 async function startServer() {
-  const app = express();
   const PORT = 3000;
 
-  app.use(express.json({ limit: '1mb' }));
+  app.use(express.json({ limit: '5mb' }));
 
   // Logging middleware
   app.use((req, res, next) => {
@@ -92,24 +94,183 @@ async function startServer() {
     const userDoc = await db.collection("users").doc(req.user.id).get();
     const userData = userDoc.data();
 
-    if (userData && (userData.is_admin === 1 || adminEmails.includes(userData.email))) {
+    if (userData && (userData.is_admin === 1 || adminEmails.includes(userData.email.toLowerCase()))) {
       next();
     } else {
       res.status(403).json({ error: "Admin access required" });
     }
   };
 
-  // OTP Auth Endpoints (Using Firebase Custom Tokens for simplicity in this flow)
+  // OTP Auth Endpoints
   app.post("/api/auth/otp/send", checkFirebase, async (req, res) => {
     const { email } = req.body;
     try {
-      // In a real Firebase setup, you'd use Firebase Auth Client SDK for OTP.
-      // For this backend-only migration, we'll simulate the flow or expect client to use Firebase Auth.
-      // Since we want to keep the existing API structure, we'll just return a success message
-      // and assume the user will use Firebase Auth on the client side.
-      res.json({ message: "Firebase Auth should be handled on the client side for OTP." });
+      if (!db) throw new Error("Database not initialized");
+      
+      // Generate 6-digit OTP
+      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+      const expiresAt = new Date(Date.now() + 5 * 60000); // 5 minutes expiry
+
+      // Store OTP in Firestore
+      await db.collection("otps").doc(email).set({
+        otp,
+        expiresAt: admin.firestore.Timestamp.fromDate(expiresAt),
+        created_at: admin.firestore.FieldValue.serverTimestamp()
+      });
+
+      // Send Email (Using Nodemailer)
+      // Note: User needs to provide SMTP credentials in .env
+      const transporter = nodemailer.createTransport({
+        host: process.env.SMTP_HOST || "smtp.gmail.com",
+        port: parseInt(process.env.SMTP_PORT || "587"),
+        secure: false,
+        auth: {
+          user: process.env.SMTP_USER,
+          pass: process.env.SMTP_PASS,
+        },
+      });
+
+      const mailOptions = {
+        from: `"yoursmeherungaming" <${process.env.SMTP_USER}>`,
+        to: email,
+        subject: "Your Verification Code",
+        text: `Your OTP for yoursmeherungaming is: ${otp}. It will expire in 5 minutes.`,
+        html: `
+          <div style="font-family: sans-serif; padding: 20px; background: #f4f4f4;">
+            <div style="max-width: 600px; margin: auto; background: white; padding: 20px; border-radius: 10px;">
+              <h2 style="color: #ea580c;">Verification Code</h2>
+              <p>Hello,</p>
+              <p>Your one-time password (OTP) for <b>yoursmeherungaming</b> is:</p>
+              <div style="font-size: 32px; font-weight: bold; letter-spacing: 5px; color: #ea580c; margin: 20px 0; text-align: center;">
+                ${otp}
+              </div>
+              <p>This code will expire in 5 minutes.</p>
+              <p>If you didn't request this, please ignore this email.</p>
+            </div>
+          </div>
+        `,
+      };
+
+      // Only attempt to send if credentials exist
+      if (process.env.SMTP_USER && process.env.SMTP_PASS) {
+        await transporter.sendMail(mailOptions);
+        res.json({ message: "OTP sent successfully to " + email });
+      } else {
+        console.log(`[DEV MODE] OTP for ${email}: ${otp}`);
+        res.json({ 
+          message: "OTP generated (Dev Mode). Check server logs.", 
+          dev_otp: otp // In production, never return the OTP in the response!
+        });
+      }
     } catch (error: any) {
-      res.status(400).json({ error: error.message });
+      console.error("OTP Send error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/auth/otp/verify", checkFirebase, async (req, res) => {
+    const { email, otp } = req.body;
+    try {
+      if (!db || !auth) throw new Error("Firebase not initialized");
+
+      const otpDoc = await db.collection("otps").doc(email).get();
+      if (!otpDoc.exists) {
+        return res.status(400).json({ error: "OTP not found or expired" });
+      }
+
+      const data = otpDoc.data();
+      const now = new Date();
+      
+      if (data?.otp !== otp) {
+        return res.status(400).json({ error: "Invalid OTP" });
+      }
+
+      if (data?.expiresAt.toDate() < now) {
+        return res.status(400).json({ error: "OTP expired" });
+      }
+
+      // OTP is valid, delete it
+      await db.collection("otps").doc(email).delete();
+
+      // Get or Create user in Firebase Auth
+      let userRecord;
+      try {
+        userRecord = await auth.getUserByEmail(email);
+      } catch (e: any) {
+        if (e.code === 'auth/user-not-found') {
+          userRecord = await auth.createUser({
+            email,
+            emailVerified: true,
+          });
+        } else {
+          throw e;
+        }
+      }
+
+      // Create Custom Token
+      const customToken = await auth.createCustomToken(userRecord.uid);
+      
+      // Get user data from Firestore
+      const userDoc = await db.collection("users").doc(userRecord.uid).get();
+      let userData = userDoc.data();
+
+      if (!userDoc.exists) {
+        // Initialize user record if missing
+        const adminEmails = ['yourmeherun007@gmail.com', 'rafiyajannat404@gmail.com', 'yoursmeherun007@gmail.com'];
+        const isAdmin = adminEmails.includes(email.toLowerCase());
+        
+        userData = {
+          id: userRecord.uid,
+          username: email.split('@')[0],
+          email: email.toLowerCase(),
+          ff_id: 'N/A',
+          first_name: isAdmin ? 'Admin' : 'User',
+          last_name: '',
+          balance: 0,
+          is_admin: isAdmin ? 1 : 0,
+          created_at: admin.firestore.FieldValue.serverTimestamp()
+        };
+        await db.collection("users").doc(userRecord.uid).set(userData);
+      }
+
+      res.json({ 
+        token: customToken,
+        user: {
+          id: userRecord.uid,
+          username: userData?.username,
+          email: userData?.email,
+          balance: userData?.balance,
+          is_admin: userData?.is_admin
+        }
+      });
+    } catch (error: any) {
+      console.error("OTP Verify error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/firebase-check", async (req, res) => {
+    try {
+      if (!db) {
+        return res.status(503).json({ 
+          status: "error", 
+          message: "Firebase Admin is NOT initialized. Check your environment variables (FIREBASE_PROJECT_ID, etc.)" 
+        });
+      }
+      
+      // Try a simple read to verify Firestore connectivity
+      // We'll just check if the collection exists or do a dummy query
+      await db.collection("settings").limit(1).get();
+      res.json({ 
+        status: "ok", 
+        message: "Firebase Admin is initialized and Firestore is reachable.",
+        projectId: process.env.FIREBASE_PROJECT_ID
+      });
+    } catch (error: any) {
+      res.status(500).json({ 
+        status: "error", 
+        message: "Firebase connection failed: " + error.message 
+      });
     }
   });
 
@@ -587,6 +748,8 @@ async function startServer() {
     try {
       if (!db) throw new Error("Database not initialized");
       
+      console.log("Initializing app data...");
+      
       // Create a sample tournament
       const tournament = {
         title: "Grand Opening Tournament",
@@ -603,16 +766,19 @@ async function startServer() {
       };
       
       await db.collection("tournaments").add(tournament);
+      console.log("Sample tournament created");
       
       // Create default settings
       await db.collection("settings").doc("general").set({
-        logo_url: "https://picsum.photos/seed/logo/200/200",
+        logo_url: "https://selected-red-tipf2l6h7a.edgeone.app/ChatGPT%20Image%20Feb%2027,%202026,%2002_52_07%20AM.png",
         updated_at: admin.firestore.FieldValue.serverTimestamp()
-      });
+      }, { merge: true });
+      console.log("Default settings created");
       
       res.json({ message: "App initialized successfully" });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      console.error("Initialization error:", error);
+      res.status(500).json({ error: "Initialization failed: " + error.message });
     }
   });
 
@@ -677,16 +843,23 @@ async function startServer() {
   });
 
   app.post("/api/admin/settings", authenticateToken, isAdmin, checkFirebase, async (req, res) => {
-    const { logo_url } = req.body;
+    const { logo_url, site_name, hero_title, hero_subtitle } = req.body;
     try {
       if (!db) throw new Error("Database not initialized");
-      await db.collection("settings").doc("general").set({
-        logo_url,
+      const settings = {
         updated_at: admin.firestore.FieldValue.serverTimestamp()
-      }, { merge: true });
+      } as any;
+      
+      if (logo_url !== undefined) settings.logo_url = logo_url;
+      if (site_name !== undefined) settings.site_name = site_name;
+      if (hero_title !== undefined) settings.hero_title = hero_title;
+      if (hero_subtitle !== undefined) settings.hero_subtitle = hero_subtitle;
+
+      await db.collection("settings").doc("general").set(settings, { merge: true });
       res.json({ message: "Settings updated" });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      console.error("Settings update error:", error);
+      res.status(500).json({ error: "Failed to save settings: " + error.message });
     }
   });
 
@@ -713,12 +886,10 @@ async function startServer() {
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
-
-  // Error handler
-  app.use((err: any, req: any, res: any, next: any) => {
-    console.error("Unhandled Error:", err);
-    res.status(500).json({ error: "Internal Server Error: " + err.message });
-  });
 }
 
-startServer();
+if (process.env.NODE_ENV !== "production" || !process.env.VERCEL) {
+  startServer();
+}
+
+export default app;
